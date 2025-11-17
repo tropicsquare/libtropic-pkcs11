@@ -1,6 +1,6 @@
 # libp11
 
-Instructions for compiling, installing, and using libp11.
+Instructions for compiling, installing, and using [libp11](https://github.com/OpenSC/libp11).
 
 Official documentation, refer to the [original README](https://github.com/OpenSC/libp11/blob/master/README.md) and [INSTALL.md](https://github.com/OpenSC/libp11/blob/master/INSTALL.md).
 
