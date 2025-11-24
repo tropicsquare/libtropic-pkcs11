@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -Wl,--gc-sections -Wl,--dependency-file=CMakeFiles/libtropic_pkcs11.dir/link.d -shared -Wl,-soname,liblibtropic_pkcs11.so -o liblibtropic_pkcs11.so CMakeFiles/libtropic_pkcs11.dir/src/pkcs11.c.o  libtropic/libtropic.a libtropic/trezor_crypto/libtrezor_crypto.a
