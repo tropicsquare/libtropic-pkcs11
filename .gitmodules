@@ -1,3 +1,6 @@
 [submodule "libtropic"]
 	path = libtropic
 	url = https://github.com/tropicsquare/libtropic.git
+[submodule "libtropic-linux"]
+	path = libtropic-linux
+	url = https://github.com/tropicsquare/libtropic-linux.git
