@@ -1,28 +1,69 @@
-# libp11
+# libtropic-pkcs11
 
-Instructions for compiling, installing, and using [libp11](https://github.com/OpenSC/libp11).
+A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This library provides a standard cryptographic token interface (Cryptoki) to access the TROPIC01's hardware random number generator (HWRNG) and other cryptographic features.
 
-Official documentation, refer to the [original README](https://github.com/OpenSC/libp11/blob/master/README.md) and [INSTALL.md](https://github.com/OpenSC/libp11/blob/master/INSTALL.md).
+## Features
 
-## Setup and Dependencies
+- ✅ **Hardware RNG** - Generate cryptographically secure random numbers using TROPIC01's true hardware RNG
+- ✅ **Chip Information** - Read TROPIC01 firmware versions and chip ID
+- ✅ **Secure Sessions** - X25519 key exchange + AES-GCM encrypted communication
 
-### Required Submodule
+## Architecture
 
-This project requires the TropicSquare libtropic library as a dependency. Before building, you need to add it as a git submodule:
-
-```bash
-git submodule add https://github.com/tropicsquare/libtropic.git
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Application Layer                            │
+│              (pkcs11-tool, OpenSSL, Firefox, etc.)               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ PKCS#11 API
+┌─────────────────────────────────────────────────────────────────┐
+│                   liblibtropic_pkcs11.so                        │
+│                    (This PKCS#11 Module)                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ libtropic API
+┌─────────────────────────────────────────────────────────────────┐
+│                        libtropic                                 │
+│          (TROPIC01 Communication Library)                        │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼ USB Serial (/dev/ttyACM0)
+┌─────────────────────────────────────────────────────────────────┐
+│                    TROPIC01 Secure Element                       │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-If you've already cloned the repository with submodules, initialize and update them:
+## Requirements
+
+### Hardware
+- TROPIC01 secure element (connected via USB, typically as `/dev/ttyACM0`)
+- Supported development boards: TS1302 devkit
+
+### Software
+- CMake 3.16+
+- GCC or Clang with C99 support
+- Linux (tested on Ubuntu, Debian)
+- Optional: `pkcs11-tool` from OpenSC for testing
+
+## Installation
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/tropicsquare/libtropic-pkcs11.git
+cd libtropic-pkcs11
+```
+
+### 2. Initialize Submodules
+
+This project depends on the `libtropic-linux` library:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### Building the Project
-
-After adding the submodule, you can build the project using CMake:
+### 3. Build
 
 ```bash
 mkdir build
@@ -31,365 +72,202 @@ cmake ..
 make
 ```
 
-The compiled PKCS#11 library will be located at `build/liblibtropic_pkcs11.so`.
+The compiled PKCS#11 module will be at: `build/liblibtropic_pkcs11.so`
 
-### Installing Prerequisites
-
-Before using the PKCS#11 library with OpenSSL, you need to install the PKCS#11 provider:
-
-**On Debian/Ubuntu:**
+### 4. Verify Build
 
 ```bash
-# For OpenSSL 3.x
-sudo apt-get install openssl-pkcs11-provider
+# Check that the library was built
+ls -la build/liblibtropic_pkcs11.so
 
-# Or alternatively
-sudo apt-get install libengine-pkcs11-openssl
+# Test with pkcs11-tool
+pkcs11-tool --module build/liblibtropic_pkcs11.so --show-info
 ```
 
-**On macOS:**
+## Quick Start
+
+### Generate Random Numbers
+
+The main feature of this module is generating random numbers from TROPIC01's hardware RNG:
 
 ```bash
-brew install openssl
-brew install opensc
+# Generate 32 random bytes
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so --generate-random 32
+
+# Save to file and view as hex
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so --generate-random 32 \
+    --output-file /tmp/random.bin && xxd /tmp/random.bin
 ```
 
-## Understanding PKCS#11 Provider
-
-### What is pkcs11prov?
-
-The **pkcs11prov** (PKCS#11 provider) is an OpenSSL 3.x provider that allows OpenSSL to use PKCS#11 modules for cryptographic operations. It replaces the older "engine" API used in OpenSSL 1.x.
-
-
-### OpenSSL Configuration File
-
-This repository includes a pre-configured `openssl.cnf` file that sets up the PKCS#11 provider. The configuration file is located in the project root and contains the following key settings:
-
-```ini
-openssl_conf = openssl_init
-
-[openssl_init]
-providers = provider_sect
-
-[provider_sect]
-default = default_sect
-pkcs11 = pkcs11_sect
-
-[default_sect]
-activate = 1
-
-[pkcs11_sect]
-identity = pkcs11prov
-# Path to the OpenSSL PKCS#11 Provider dynamic module
-module = /usr/lib/aarch64-linux-gnu/ossl-modules/pkcs11prov.so
-# Path to YOUR custom PKCS#11 library
-module-path = /home/ales/Documents/PKCS11/libtropic-pkcs11/build/liblibtropic_pkcs11.so
-activate = 1
+**Example Output:**
+```
+>>> Random bytes (32 bytes):
+0x26, 0xA9, 0x1B, 0x4F, 0x17, 0xE6, 0x2D, 0x5C,
+0xF0, 0x9F, 0x44, 0xEB, 0x2C, 0xF8, 0xAE, 0x15,
+0x40, 0x6C, 0x14, 0xE6, 0xE7, 0xAB, 0x24, 0xEE,
+0xCD, 0x87, 0x16, 0xC3, 0x01, 0x31, 0x27, 0x75
 ```
 
-**Important**: You need to update the `module-path` in `openssl.cnf` to point to your compiled PKCS#11 library:
+### List Slots
 
 ```bash
-# Edit openssl.cnf and update this line:
-module-path = /path/to/your/build/liblibtropic_pkcs11.so
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so --list-slots
 ```
 
-**Architecture Notes**:
-- The `module` path (pkcs11prov.so) varies by architecture:
-  - ARM64/aarch64: `/usr/lib/aarch64-linux-gnu/ossl-modules/pkcs11prov.so`
-  - x86_64: `/usr/lib/x86_64-linux-gnu/ossl-modules/pkcs11prov.so`
-- The provided `test_ossl.sh` script automatically detects and adjusts for your architecture
-
-### Using the Configuration File
-
-To use the provided configuration file:
+### Show Module Info
 
 ```bash
-export OPENSSL_CONF=$PWD/openssl.cnf
-openssl list -providers
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so --show-info
 ```
 
-Or specify it on the command line:
+## Implemented PKCS#11 Functions
 
+| Function | Status | Description |
+|----------|--------|-------------|
+| `C_Initialize` | ✅ | Initialize the library |
+| `C_Finalize` | ✅ | Clean up the library |
+| `C_GetInfo` | ✅ | Get library info + TROPIC01 chip info |
+| `C_GetFunctionList` | ✅ | Get function pointer table |
+| `C_GetSlotList` | ✅ | List available slots |
+| `C_GetSlotInfo` | ✅ | Get slot information |
+| `C_GetTokenInfo` | ✅ | Get token information |
+| `C_OpenSession` | ✅ | Open a session |
+| `C_CloseSession` | ✅ | Close a session |
+| `C_GenerateRandom` | ✅ | **Generate random bytes (HWRNG)** |
+| `C_SeedRandom` | ✅ | No-op (HWRNG doesn't need seeding) |
+| All others | ❌ | Return `CKR_FUNCTION_NOT_SUPPORTED` |
+
+## Configuration
+
+### USB Device Path
+
+By default, the module communicates with TROPIC01 at `/dev/ttyACM0`. If your device is at a different path, you may need to modify `src/pkcs11.c`.
+
+To find your device:
 ```bash
-openssl -config ./openssl.cnf list -providers
+ls -la /dev/ttyACM*
+dmesg | grep ttyACM
 ```
 
-## Quick Testing with the Provided Script
+### Pairing Keys
 
-This repository includes a test script (`test_ossl.sh`) that automatically configures and tests your PKCS#11 library with OpenSSL.
+The module uses pairing keys stored in `libtropic/keys/keys.c`. The default keys (sh0) work with standard Tropic Square development chips. For custom-provisioned chips, you may need to update these keys.
 
-### Running the Test Script
+## Using with OpenSSL
 
+### OpenSSL 3.x (Provider)
+
+1. Install the PKCS#11 provider:
+   ```bash
+   # Debian/Ubuntu
+   sudo apt-get install openssl-pkcs11-provider
+   ```
+
+2. Configure OpenSSL (create or edit `openssl.cnf`):
+   ```ini
+   openssl_conf = openssl_init
+   
+   [openssl_init]
+   providers = provider_sect
+   
+   [provider_sect]
+   default = default_sect
+   pkcs11 = pkcs11_sect
+   
+   [default_sect]
+   activate = 1
+   
+   [pkcs11_sect]
+   identity = pkcs11prov
+   module = /usr/lib/x86_64-linux-gnu/ossl-modules/pkcs11prov.so
+   module-path = /path/to/build/liblibtropic_pkcs11.so
+   activate = 1
+   ```
+
+3. Generate random data:
+   ```bash
+   OPENSSL_CONF=./openssl.cnf openssl rand -hex 32
+   ```
+
+### Test Script
+
+A test script is provided for OpenSSL integration:
 ```bash
-chmod +x test_ossl.sh
 ./test_ossl.sh
 ```
 
-The script will:
-1. Detect your system architecture (aarch64 or x86_64)
-2. Check if the PKCS#11 provider is installed
-3. Automatically configure the correct provider path
-4. Test loading the provider
-5. Generate random data using your PKCS#11 library
-
-**Example output:**
+## Project Structure
 
 ```
-=== OpenSSL PKCS#11 Provider Test ===
-
-Architecture: aarch64
-Provider path: /usr/lib/aarch64-linux-gnu/ossl-modules/pkcs11prov.so
-
-✓ PKCS#11 provider found
-
-OpenSSL version:
-OpenSSL 3.0.2 15 Mar 2022 (Library: OpenSSL 3.0.2 15 Mar 2022)
-
-Using config: /path/to/openssl.cnf
-
-=== Listing OpenSSL Providers ===
-Providers:
-  default
-    name: OpenSSL Default Provider
-    version: 3.0.2
-    status: active
-  pkcs11
-    name: PKCS#11 Provider
-    version: 0.2
-    status: active
-
-✓ PKCS#11 provider is loaded!
-
-=== Testing Random Generation with PKCS#11 ===
-Generating 16 bytes...
-[random hex output]
-
-Generating 32 bytes...
-[random hex output]
-
-=== SUCCESS! ===
-Your PKCS#11 library is working with OpenSSL!
+libtropic-pkcs11/
+├── src/
+│   ├── pkcs11.c          # PKCS#11 function implementations (~1100 lines, documented)
+│   └── pkcs11.h          # PKCS#11 type definitions (~600 lines, documented)
+├── libtropic/            # libtropic library (submodule)
+│   └── keys/
+│       └── keys.c        # Pairing keys for secure session
+├── CMakeLists.txt        # Build configuration
+├── openssl.cnf           # OpenSSL configuration example
+├── test_ossl.sh          # OpenSSL test script
+├── WHATWASCHANGED.md     # Detailed development documentation
+└── README.md             # This file
 ```
 
-## Testing the Installation
+## Troubleshooting
 
-### 1. Verify Provider Installation
+### "undefined symbol: lt_port_init"
+The USB port implementation wasn't linked. Ensure `libtropic_port_unix_usb_dongle.c` is in the CMakeLists.txt sources.
 
-Check if the pkcs11prov provider is available:
+### "LT_L2_HSK_ERR" (Handshake Error)
+The pairing keys don't match your chip. Check:
+1. Your chip batch/model
+2. The keys in `libtropic/keys/keys.c`
+3. Try running `lt_ex_hello_world` from libtropic-linux to verify correct keys
 
-```bash
-openssl list -providers -verbose -provider pkcs11prov
-```
+### "Bus error" or "SIGBUS"
+This usually indicates a misaligned `CK_FUNCTION_LIST` structure. The header file must have all 68 function pointers in the correct PKCS#11 2.40 order.
 
-Expected output:
-```
-Providers:
-  pkcs11prov
-    name: libp11 PKCS#11 provider (pkcs11prov)
-    version: 0.4.16
-    status: active
-    ...
-```
+### Device not found (/dev/ttyACM0)
+1. Check USB connection
+2. Verify device path: `ls /dev/ttyACM*`
+3. Check permissions: `sudo chmod 666 /dev/ttyACM0`
+4. Add user to dialout group: `sudo usermod -a -G dialout $USER`
 
-### 2. Verify Engine Installation (OpenSSL 1.x)
+## Documentation
 
-For OpenSSL 1.x, test the engine:
+For detailed technical documentation including:
+- Complete code explanations
+- Problems encountered and solutions
+- Build configuration details
+- Future improvement suggestions
 
-```bash
-openssl engine pkcs11 -t
-```
+See: **[WHATWASCHANGED.md](./WHATWASCHANGED.md)**
 
-Expected output:
-```
-(pkcs11) pkcs11 engine
-     [ available ]
-```
+## Security Notice
 
-### 3. Test Basic Functionality
+⚠️ **Warning**: The default pairing keys in this repository are for **development and testing only**. They are publicly known and should NOT be used in production. For production deployments:
 
-A simple test that works without a token is generating random data:
+1. Provision your TROPIC01 chips with unique keys
+2. Update `libtropic/keys/keys.c` with your private keys
+3. Never commit private keys to version control
 
-```bash
-# Using the provider (OpenSSL 3.x)
-openssl rand -provider pkcs11prov -hex 32
-```
+## License
 
-**Note**: This command uses the PKCS#11 module's random number generator if available, but will fall back to OpenSSL's default RNG if no token is present.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Basic Usage Examples
+## References
 
-### Example 1: Generate Random Data
+- [PKCS#11 v2.40 Specification (OASIS)](https://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/pkcs11-base-v2.40.html)
+- [libtropic Documentation](https://github.com/tropicsquare/libtropic)
+- [TROPIC01 Product Page](https://tropicsquare.com)
+- [OpenSC pkcs11-tool](https://github.com/OpenSC/OpenSC/wiki/Using-pkcs11-tool)
 
-```bash
-# Generate 64 random bytes in hexadecimal format
-openssl rand -engine pkcs11 -hex 64
+## Contributing
 
-# Or with provider (OpenSSL 3.x)
-openssl rand -provider pkcs11prov -hex 64
-```
+Contributions are welcome! Please read the development documentation in `WHATWASCHANGED.md` for technical details about the implementation.
 
-### Example 2: List Available Providers
+## Acknowledgments
 
-```bash
-openssl list -providers -verbose -provider pkcs11prov
-```
-
-### Example 3: Check OpenSSL Version and Modules
-
-```bash
-# Check OpenSSL version
-openssl version -a
-
-# List providers (OpenSSL 3.x)
-openssl list -providers
-```
-
-## Using pkcs11-tool
-
-The `pkcs11-tool` utility (part of OpenSC) provides a command-line interface for interacting with PKCS#11 modules directly. This is useful for testing and debugging your PKCS#11 library.
-
-### Installation
-
-```bash
-# On Debian/Ubuntu
-sudo apt-get install opensc
-
-# On macOS
-brew install opensc
-```
-
-### Example 1: List Available Slots
-
-Use the `-L` flag to list all available slots in the PKCS#11 module:
-
-```bash
-pkcs11-tool --module /path/to/your/libpkcs11.so -L
-```
-
-**Example output:**
-
-```
->>> LIBRARY CONSTRUCTOR CALLED - Installing segfault handler
-========================================
->>> C_GetFunctionList (ppFunctionList=0xffffc8eb2cc0)
->>> LOADING TROPIC PKCS#11 LIBRARY
-========================================
->>> C_GetFunctionList OK (function list returned at 0xf4939da00058)
->>> Function pointers: C_Initialize=0xf4939d9e100c, C_Finalize=0xf4939d9e10c0, C_GetInfo=0xf4939d9e11dc
->>> Function pointers: C_CloseSession=0xf4939d9e17fc, C_CloseAllSessions=0xf4939d9e1b04
->>> C_Initialize (pInitArgs=(nil))
->>> C_Initialize OK
->>> C_GetSlotList (tokenPresent=0, pSlotList=(nil), pulCount=0xb80a8f473700)
->>> Query mode: returning count=1
->>> C_GetSlotList OK (count=1)
->>> C_GetSlotList (tokenPresent=0, pSlotList=0xb80ac1e73390, pulCount=0xb80a8f473700)
->>> Filled slot list: slotID=1
->>> C_GetSlotList OK (count=1)
-Available slots:
-Slot 0 (0x1): >>> C_GetSlotInfo (slotID=1, pInfo=0xffffc8eb2ae0)
->>> C_GetSlotInfo OK (description='Tropic Slot', flags=0x5)
-Tropic Slot
->>> C_GetTokenInfo (slotID=1, pInfo=0xffffc8eb29d0)
->>> C_GetTokenInfo OK (label='TROPIC-RNG', flags=0x8)
-  token state:   uninitialized
->>> C_Finalize ENTRY (pReserved=(nil))
->>> C_Finalize (pReserved=(nil))
->>> C_Finalize OK
->>> C_Finalize DONE
-```
-
-### Example 2: List Tokens
-
-Use the `-T` flag to list all tokens with detailed information:
-
-```bash
-pkcs11-tool --module /path/to/your/libpkcs11.so -T
-```
-
-**Example output:**
-
-```
->>> LIBRARY CONSTRUCTOR CALLED - Installing segfault handler
-========================================
->>> C_GetFunctionList (ppFunctionList=0xffffdd0e88c0)
->>> LOADING TROPIC PKCS#11 LIBRARY
-========================================
->>> C_GetFunctionList OK (function list returned at 0xeabab0160058)
->>> Function pointers: C_Initialize=0xeabab014100c, C_Finalize=0xeabab01410c0, C_GetInfo=0xeabab01411dc
->>> Function pointers: C_CloseSession=0xeabab01417fc, C_CloseAllSessions=0xeabab0141b04
->>> C_Initialize (pInitArgs=(nil))
->>> C_Initialize OK
->>> C_GetSlotList (tokenPresent=1, pSlotList=(nil), pulCount=0xb994afe93700)
->>> Query mode: returning count=1
->>> C_GetSlotList OK (count=1)
->>> C_GetSlotList (tokenPresent=1, pSlotList=0xb994dfd9a390, pulCount=0xb994afe93700)
->>> Filled slot list: slotID=1
->>> C_GetSlotList OK (count=1)
-Available slots:
-Slot 0 (0x1): >>> C_GetSlotInfo (slotID=1, pInfo=0xffffdd0e86e0)
->>> C_GetSlotInfo OK (description='Tropic Slot', flags=0x5)
-Tropic Slot
->>> C_GetTokenInfo (slotID=1, pInfo=0xffffdd0e85d0)
->>> C_GetTokenInfo OK (label='TROPIC-RNG', flags=0x8)
-  token state:   uninitialized
->>> C_Finalize ENTRY (pReserved=(nil))
->>> C_Finalize (pReserved=(nil))
->>> C_Finalize OK
->>> C_Finalize DONE
-```
-
-### Example 3: Generate Random Data
-
-Generate random data using the PKCS#11 module's RNG:
-
-```bash
-# Generate 16 bytes of random data
-pkcs11-tool --module /path/to/your/libpkcs11.so --generate-random 16
-
-# Generate 32 bytes of random data in hex format
-pkcs11-tool --module /path/to/your/libpkcs11.so --generate-random 32 | xxd -p
-```
-
-### Example 4: Get Module Information
-
-Display information about the PKCS#11 module:
-
-```bash
-pkcs11-tool --module /path/to/your/libpkcs11.so --show-info
-```
-
-### Common pkcs11-tool Options
-
-| Option | Description |
-|--------|-------------|
-| `-L` or `--list-slots` | List available slots |
-| `-T` or `--list-token-slots` | List slots with tokens |
-| `-I` or `--show-info` | Show general token information |
-| `-M` or `--list-mechanisms` | List supported mechanisms |
-| `--generate-random N` | Generate N bytes of random data |
-| `-O` or `--list-objects` | List objects on the token |
-| `--slot N` | Specify slot number to use |
-
-### Notes
-
-- The verbose output shown in the examples above is from the debug logging in the PKCS#11 library
-- Replace `/path/to/your/libpkcs11.so` with the actual path to your PKCS#11 module
-- For this repository, after building, use the library at:
-  ```bash
-  pkcs11-tool --module ./build/liblibtropic_pkcs11.so -L
-  ```
-- Make sure to build the project first (see "Building the Project" section above)
-
-
-
-- OpenSSL 1.x uses engines
-- OpenSSL 3.x uses providers
-
-## Resources
-
-- **Official Repository**: https://github.com/OpenSC/libp11
-- **Original README**: https://github.com/OpenSC/libp11/blob/master/README.md
-- **Official INSTALL.md**: https://github.com/OpenSC/libp11/blob/master/INSTALL.md
-- **Release Tarballs**: https://github.com/OpenSC/libp11/releases
-
+- Tropic Square s.r.o. for the TROPIC01 secure element and libtropic library
+- OpenSC project for `pkcs11-tool`
+- OASIS for the PKCS#11 specification
