@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.31.6)
+cmake_minimum_required(VERSION 3.21.0)
 project(libtropic_pkcs11)
 
 # Enable Position Independent Code for all targets (required for shared library)
