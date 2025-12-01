@@ -140,8 +140,6 @@ static void segfault_handler(int sig) {
  */
 __attribute__((constructor))
 static void library_init(void) {
-    printf(">>> LIBRARY CONSTRUCTOR CALLED - Installing signal handlers\n");
-    fflush(stdout);
     signal(SIGSEGV, segfault_handler);  /* Catch segmentation faults */
     signal(SIGBUS, segfault_handler);   /* Catch bus errors (memory alignment) */
 }
@@ -214,10 +212,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
  * and release hardware resources here.
  */
 CK_RV C_Finalize(CK_VOID_PTR pReserved) {
-    printf(">>> C_Finalize ENTRY (pReserved=%p)\n", pReserved);
-    fflush(stdout);
     LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
-    fflush(stdout);
     
     /* Can't finalize if not initialized */
     if (!initialized) {
@@ -230,9 +225,6 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     initialized = CK_FALSE;
     
     LT_PKCS11_LOG(">>> C_Finalize OK");
-    fflush(stdout);
-    printf(">>> C_Finalize DONE\n");
-    fflush(stdout);
     return CKR_OK;
 }
 
@@ -454,7 +446,6 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PT
  * - CKF_HW_SLOT: This is a hardware slot (not software emulation)
  */
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
-    printf(">>> C_GetSlotInfo ENTRY\n"); fflush(stdout);
     LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
     /* We only support slot ID 1 */
@@ -498,7 +489,6 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
  * - CKF_RNG: This token has a hardware Random Number Generator
  */
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
-    printf(">>> C_GetTokenInfo ENTRY\n"); fflush(stdout);
     LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
     /* We only support slot ID 1 */
@@ -549,8 +539,6 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
  */
 CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
-    printf(">>> C_OpenSession ENTRY\n");
-    fflush(stdout);
     LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
         slotID, flags, pApplication, Notify, phSession);
     
@@ -825,14 +813,11 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * 
      * NOTE: Remove this for production use - it pollutes stdout.
      */
-    printf(">>> Random bytes (%lu bytes):\n", ulRandomLen);
+    LT_PKCS11_LOG(">>> Random bytes (%lu bytes):\n", ulRandomLen);
     for (CK_ULONG i = 0; i < ulRandomLen; i++) {
-        printf("0x%02X", pRandomData[i]);
-        if (i < ulRandomLen - 1) printf(", ");
-        if ((i + 1) % 8 == 0) printf("\n");  /* New line every 8 bytes */
+        LT_PKCS11_LOG("0x%02X", pRandomData[i]);
     }
-    if (ulRandomLen % 8 != 0) printf("\n");
-    fflush(stdout);
+    if (ulRandomLen % 8 != 0) LT_PKCS11_LOG("\n");
     
     LT_PKCS11_LOG(">>> C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
     return CKR_OK;
