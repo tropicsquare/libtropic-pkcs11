@@ -74,7 +74,6 @@
 #include "string.h"                         /* Additional string functions */
 #include "libtropic_port.h"                 /* Hardware Abstraction Layer (HAL) interface */
 #include "libtropic_port_unix_usb_dongle.h" /* Unix USB dongle HAL implementation */
-
 /* ==================================================================================
  * DEBUG LOGGING MACRO
  * ==================================================================================
@@ -629,6 +628,7 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
  * These are factory-provisioned keys. Different chip batches have different keys.
  * The keys enable mutual authentication and encrypted communication.
  */
+
 extern uint8_t sh0priv[];
 extern uint8_t sh0pub[];
 

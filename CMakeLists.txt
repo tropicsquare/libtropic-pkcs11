@@ -11,12 +11,15 @@ set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic-linux/libtropic/)
 # You can use e.g. trezor_crypto as the cryptography provider.
 set(LT_CRYPTO "trezor_crypto")
 
+# Enable building examples from libtropic
+set(LT_BUILD_EXAMPLES ON CACHE BOOL "Build libtropic examples" FORCE)
+
 add_library(libtropic_pkcs11 SHARED
             src/pkcs11.h
             src/pkcs11.c
             ${PATH_LIBTROPIC}/hal/port/unix/libtropic_port_unix_usb_dongle.c
-            ${PATH_LIBTROPIC}/keys/keys.c
-            )
+	    sh0_keys.c     
+    	    )
 
 # Add path to the libtropic's repository root folder.
 add_subdirectory(${PATH_LIBTROPIC} "libtropic")
