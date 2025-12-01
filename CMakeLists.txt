@@ -5,7 +5,7 @@ project(libtropic_pkcs11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Set path to libtropic (inside libtropic-linux)
-set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic-linux/libtropic/)
+set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
 
 # It is necessary to set provider of cryptography functions.
 # You can use e.g. trezor_crypto as the cryptography provider.
