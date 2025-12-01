@@ -62,7 +62,6 @@
 #include <stdio.h>            /* printf(), fflush() for debug output */
 #include <string.h>           /* strncpy(), memset() for string/memory operations */
 #include <stdlib.h>           /* exit() */
-#include <signal.h>           /* signal() for crash handler (debug only) */
 #include <time.h>             /* time() for RNG seed */
 #include <inttypes.h>         /* PRIu64 and similar format specifiers */
 
@@ -77,14 +76,6 @@
 /* ==================================================================================
  * DEBUG LOGGING MACRO
  * ==================================================================================
- * 
- * This macro prints debug messages to stdout with automatic newline.
- * The do-while(0) wrapper is a C idiom that makes the macro behave like a statement.
- * fflush(stdout) ensures output appears immediately (not buffered).
- * 
- * Usage: LT_PKCS11_LOG("Value is %d", value);
- * Output: "Value is 42\n"
- * 
  * TODO: In production, this should be disabled or controlled by environment variable.
  */
 
@@ -100,49 +91,6 @@
  */
 static CK_BBOOL initialized = CK_FALSE;
 
-/* ==================================================================================
- * DEBUG SIGNAL HANDLERS (FOR DEVELOPMENT ONLY)
- * ==================================================================================
- * 
- * These handlers catch segmentation faults (SIGSEGV) and bus errors (SIGBUS).
- * They were added during development to help debug crashes.
- * 
- * SIGSEGV: Occurs when accessing invalid memory address
- * SIGBUS:  Occurs when accessing misaligned memory (common on ARM)
- * 
- * WARNING: Signal handlers in libraries can interfere with the application's
- * own handlers. Remove these for production use!
- * 
- * The __attribute__((constructor)) makes library_init() run automatically
- * when the shared library is loaded (before main() in the application).
- */
-
-/**
- * @brief Signal handler that catches crashes and prints a message before exiting.
- * @param sig The signal number (SIGSEGV=11, SIGBUS=7 on most systems)
- * 
- * NOTE: This is for debugging only. Remove for production!
- */
-static void segfault_handler(int sig) {
-    printf("\n!!! SEGFAULT CAUGHT - signal %d !!!\n", sig);
-    fflush(stdout);
-    exit(1);
-}
-
-/**
- * @brief Library constructor - runs automatically when .so is loaded.
- * 
- * Installs signal handlers for catching crashes during development.
- * The __attribute__((constructor)) is a GCC extension that marks this
- * function to run at library load time.
- * 
- * NOTE: Remove this for production use!
- */
-__attribute__((constructor))
-static void library_init(void) {
-    signal(SIGSEGV, segfault_handler);  /* Catch segmentation faults */
-    signal(SIGBUS, segfault_handler);   /* Catch bus errors (memory alignment) */
-}
 
 
 /* ==================================================================================
@@ -217,7 +165,6 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     /* Can't finalize if not initialized */
     if (!initialized) {
         LT_PKCS11_LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
-        fflush(stdout);
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
@@ -583,11 +530,9 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
      * we didn't create. This is not an error, just informational. */
     LT_PKCS11_LOG(">>> WARNING: This session was never opened by C_OpenSession!");
     LT_PKCS11_LOG(">>> pkcs11-tool might be reusing a stale session or has a bug");
-    fflush(stdout);
     
     /* We don't crash on invalid sessions - just return OK */
     LT_PKCS11_LOG(">>> C_CloseSession OK (ignoring invalid session)");
-    fflush(stdout);
     return CKR_OK;
 }
 
