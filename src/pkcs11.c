@@ -82,13 +82,11 @@
  * The do-while(0) wrapper is a C idiom that makes the macro behave like a statement.
  * fflush(stdout) ensures output appears immediately (not buffered).
  * 
- * Usage: LOG("Value is %d", value);
+ * Usage: LT_PKCS11_LOG("Value is %d", value);
  * Output: "Value is 42\n"
  * 
  * TODO: In production, this should be disabled or controlled by environment variable.
  */
-#define LOG(...) do { printf(__VA_ARGS__); printf("\n"); fflush(stdout); } while(0)
-
 
 /* ==================================================================================
  * GLOBAL STATE
@@ -185,18 +183,18 @@ static void library_init(void) {
  * they should each call C_Initialize independently."
  */
 CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
-    LOG(">>> C_Initialize (pInitArgs=%p)", pInitArgs);
+    LT_PKCS11_LOG(">>> C_Initialize (pInitArgs=%p)", pInitArgs);
     
     /* Check if already initialized - PKCS#11 forbids double initialization */
     if (initialized) {
-        LOG(">>> Already initialized - returning CKR_CRYPTOKI_ALREADY_INITIALIZED");
+        LT_PKCS11_LOG(">>> Already initialized - returning CKR_CRYPTOKI_ALREADY_INITIALIZED");
         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
     }
     
     /* Mark as initialized */
     initialized = CK_TRUE;
     
-    LOG(">>> C_Initialize OK");
+    LT_PKCS11_LOG(">>> C_Initialize OK");
     return CKR_OK;
 }
 
@@ -218,12 +216,12 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
 CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     printf(">>> C_Finalize ENTRY (pReserved=%p)\n", pReserved);
     fflush(stdout);
-    LOG(">>> C_Finalize (pReserved=%p)", pReserved);
+    LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
     fflush(stdout);
     
     /* Can't finalize if not initialized */
     if (!initialized) {
-        LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
         fflush(stdout);
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
@@ -231,7 +229,7 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     /* Mark as not initialized */
     initialized = CK_FALSE;
     
-    LOG(">>> C_Finalize OK");
+    LT_PKCS11_LOG(">>> C_Finalize OK");
     fflush(stdout);
     printf(">>> C_Finalize DONE\n");
     fflush(stdout);
@@ -257,11 +255,11 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
  * @return CKR_ARGUMENTS_BAD if pInfo is NULL
  */
 CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
-    LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
+    LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
     
     /* Validate parameter */
     if (!pInfo) {
-        LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
 
@@ -306,7 +304,7 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
     /* Step 4: Initialize communication with the chip */
     lt_ret_t ret = lt_init(&h);
     if (ret == LT_OK) {
-        LOG(">>> TROPIC01 initialized successfully");
+        LT_PKCS11_LOG(">>> TROPIC01 initialized successfully");
         
         /* Read RISC-V firmware version
          * 
@@ -317,9 +315,9 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
         
         ret = lt_get_info_riscv_fw_ver(&h, fw_ver);
         if (ret == LT_OK) {
-            LOG(">>> RISC-V FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
+            LT_PKCS11_LOG(">>> RISC-V FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
         } else {
-            LOG(">>> Failed to get RISC-V FW version: %s", lt_ret_verbose(ret));
+            LT_PKCS11_LOG(">>> Failed to get RISC-V FW version: %s", lt_ret_verbose(ret));
         }
         
         /* Read SPECT firmware version
@@ -329,9 +327,9 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
          */
         ret = lt_get_info_spect_fw_ver(&h, fw_ver);
         if (ret == LT_OK) {
-            LOG(">>> SPECT FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
+            LT_PKCS11_LOG(">>> SPECT FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
         } else {
-            LOG(">>> Failed to get SPECT FW version: %s", lt_ret_verbose(ret));
+            LT_PKCS11_LOG(">>> Failed to get SPECT FW version: %s", lt_ret_verbose(ret));
         }
         
         /* Read chip ID
@@ -347,17 +345,17 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
         struct lt_chip_id_t chip_id = {0};
         ret = lt_get_info_chip_id(&h, &chip_id);
         if (ret == LT_OK) {
-            LOG(">>> Chip ID:");
+            LT_PKCS11_LOG(">>> Chip ID:");
             /* lt_print_chip_id() formats and prints all chip info fields */
             lt_print_chip_id(&chip_id, printf);
         } else {
-            LOG(">>> Failed to get chip ID: %s", lt_ret_verbose(ret));
+            LT_PKCS11_LOG(">>> Failed to get chip ID: %s", lt_ret_verbose(ret));
         }
         
         /* Step 5: Clean up - always deinitialize when done */
         lt_deinit(&h);
     } else {
-        LOG(">>> TROPIC01 init failed: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG(">>> TROPIC01 init failed: %s", lt_ret_verbose(ret));
     }
 
     /* =========================================================================
@@ -378,7 +376,7 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
     strncpy((char*)pInfo->libraryDescription, "Tropic PKCS11", 32);
     
-    LOG(">>> C_GetInfo OK (version=%d.%d, manufacturer=TropicSquare)", 
+    LT_PKCS11_LOG(">>> C_GetInfo OK (version=%d.%d, manufacturer=TropicSquare)", 
         pInfo->cryptokiVersion.major, pInfo->cryptokiVersion.minor);
     return CKR_OK;
 }
@@ -407,32 +405,32 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
  * @return CKR_BUFFER_TOO_SMALL if pSlotList array is too small
  */
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount) {
-    LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
+    LT_PKCS11_LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
         tokenPresent, pSlotList, pulCount);
     
     /* pulCount is required */
     if (!pulCount) {
-        LOG(">>> pulCount is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pulCount is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
     if (!pSlotList) {
         /* Query mode: application wants to know how many slots exist */
         *pulCount = 1;  /* We have exactly one slot */
-        LOG(">>> Query mode: returning count=1");
+        LT_PKCS11_LOG(">>> Query mode: returning count=1");
     } else {
         /* Fill mode: application wants the actual slot IDs */
         if (*pulCount < 1) {
             /* Array too small to hold our slot */
-            LOG(">>> Buffer too small (pulCount=%lu) - returning CKR_BUFFER_TOO_SMALL", *pulCount);
+            LT_PKCS11_LOG(">>> Buffer too small (pulCount=%lu) - returning CKR_BUFFER_TOO_SMALL", *pulCount);
             return CKR_BUFFER_TOO_SMALL;
         }
         pSlotList[0] = 1;   /* Our slot has ID 1 */
         *pulCount = 1;      /* We returned 1 slot */
-        LOG(">>> Filled slot list: slotID=1");
+        LT_PKCS11_LOG(">>> Filled slot list: slotID=1");
     }
     
-    LOG(">>> C_GetSlotList OK (count=%lu)", *pulCount);
+    LT_PKCS11_LOG(">>> C_GetSlotList OK (count=%lu)", *pulCount);
     return CKR_OK;
 }
 
@@ -457,17 +455,17 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PT
  */
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
     printf(">>> C_GetSlotInfo ENTRY\n"); fflush(stdout);
-    LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
+    LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
     /* We only support slot ID 1 */
     if (slotID != 1) { 
-        LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
         return CKR_SLOT_ID_INVALID;
     }
     
     /* pInfo is required */
     if (!pInfo) {
-        LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -477,7 +475,7 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);    /* Max 32 chars */
     pInfo->flags = CKF_TOKEN_PRESENT | CKF_HW_SLOT;               /* Token is present, hardware slot */
     
-    LOG(">>> C_GetSlotInfo OK (description='Tropic Slot', flags=0x%lx)", pInfo->flags);
+    LT_PKCS11_LOG(">>> C_GetSlotInfo OK (description='Tropic Slot', flags=0x%lx)", pInfo->flags);
     return CKR_OK;
 }
 
@@ -501,17 +499,17 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
  */
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     printf(">>> C_GetTokenInfo ENTRY\n"); fflush(stdout);
-    LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
+    LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
     /* We only support slot ID 1 */
     if (slotID != 1) { 
-        LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
         return CKR_SLOT_ID_INVALID;
     }
     
     /* pInfo is required */
     if (!pInfo) {
-        LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -521,7 +519,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32); /* Manufacturer, max 32 chars */
     pInfo->flags = CKF_RNG;  /* This token has a hardware RNG! */
     
-    LOG(">>> C_GetTokenInfo OK (label='TROPIC-RNG', flags=0x%lx)", pInfo->flags);
+    LT_PKCS11_LOG(">>> C_GetTokenInfo OK (label='TROPIC-RNG', flags=0x%lx)", pInfo->flags);
     return CKR_OK;
 }
 
@@ -553,18 +551,18 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
     printf(">>> C_OpenSession ENTRY\n");
     fflush(stdout);
-    LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
+    LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
         slotID, flags, pApplication, Notify, phSession);
     
     /* We only support slot ID 1 */
     if (slotID != 1) {
-        LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
         return CKR_SLOT_ID_INVALID;
     }
     
     /* phSession is required - we need somewhere to return the handle */
     if (!phSession) {
-        LOG(">>> phSession is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> phSession is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -572,7 +570,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
      * NOTE: In production, we should generate unique handles and track sessions */
     *phSession = 0x12345678;
     
-    LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
+    LT_PKCS11_LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
     return CKR_OK;
 }
 
@@ -591,16 +589,16 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
  * TODO: Implement proper session validation for production use.
  */
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
-    LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
+    LT_PKCS11_LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
     
     /* NOTE: We print a warning because pkcs11-tool may call this with handles
      * we didn't create. This is not an error, just informational. */
-    LOG(">>> WARNING: This session was never opened by C_OpenSession!");
-    LOG(">>> pkcs11-tool might be reusing a stale session or has a bug");
+    LT_PKCS11_LOG(">>> WARNING: This session was never opened by C_OpenSession!");
+    LT_PKCS11_LOG(">>> pkcs11-tool might be reusing a stale session or has a bug");
     fflush(stdout);
     
     /* We don't crash on invalid sessions - just return OK */
-    LOG(">>> C_CloseSession OK (ignoring invalid session)");
+    LT_PKCS11_LOG(">>> C_CloseSession OK (ignoring invalid session)");
     fflush(stdout);
     return CKR_OK;
 }
@@ -663,7 +661,7 @@ extern uint8_t sh0pub[];
  * session (see improvement suggestions in WHATWASCHANGED.md).
  */
 CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen) {
-    LOG(">>> C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
+    LT_PKCS11_LOG(">>> C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
         hSession, pRandomData, ulRandomLen);
     
     /* =========================================================================
@@ -674,11 +672,11 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * appropriate error codes.
      */
     if (!pRandomData) {
-        LOG(">>> pRandomData is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pRandomData is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     if (ulRandomLen == 0) {
-        LOG(">>> ulRandomLen is 0 - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> ulRandomLen is 0 - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -710,10 +708,10 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * - Sends initial handshake to verify chip is responding
      * - Sets up communication buffers
      */
-    LOG(">>> Initializing handle");
+    LT_PKCS11_LOG(">>> Initializing handle");
     lt_ret_t ret = lt_init(&h);
     if (ret != LT_OK) {
-        LOG(">>> Failed to initialize handle: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG(">>> Failed to initialize handle: %s", lt_ret_verbose(ret));
         lt_deinit(&h);  /* Clean up even on failure */
         return CKR_GENERAL_ERROR;
     }
@@ -741,14 +739,14 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * Key slots have different access permissions - slot 0 typically has
      * full access, while others may be restricted.
      */
-    LOG(">>> Starting Secure Session with key %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
+    LT_PKCS11_LOG(">>> Starting Secure Session with key %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
     ret = lt_verify_chip_and_start_secure_session(&h, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
     if (ret != LT_OK) {
-        LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
         lt_deinit(&h);
         return CKR_GENERAL_ERROR;
     }
-    LOG(">>> Secure session established");
+    LT_PKCS11_LOG(">>> Secure session established");
     
     /* =========================================================================
      * STEP 5: GET RANDOM BYTES FROM HARDWARE RNG
@@ -773,7 +771,7 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
         /* Request random bytes from the chip */
         ret = lt_random_value_get(&h, ptr, chunk_size);
         if (ret != LT_OK) {
-            LOG(">>> Failed to get random bytes: %s", lt_ret_verbose(ret));
+            LT_PKCS11_LOG(">>> Failed to get random bytes: %s", lt_ret_verbose(ret));
             /* On error, clean up and return */
             lt_session_abort(&h);
             lt_deinit(&h);
@@ -794,10 +792,10 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * - Clears session keys from memory
      * - Allows new sessions to be established
      */
-    LOG(">>> Aborting Secure Session");
+    LT_PKCS11_LOG(">>> Aborting Secure Session");
     ret = lt_session_abort(&h);
     if (ret != LT_OK) {
-        LOG(">>> Failed to abort Secure Session: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG(">>> Failed to abort Secure Session: %s", lt_ret_verbose(ret));
         lt_deinit(&h);
         return CKR_GENERAL_ERROR;
     }
@@ -811,10 +809,10 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
      * - Frees allocated buffers
      * - Resets handle state
      */
-    LOG(">>> Deinitializing handle");
+    LT_PKCS11_LOG(">>> Deinitializing handle");
     ret = lt_deinit(&h);
     if (ret != LT_OK) {
-        LOG(">>> Failed to deinitialize handle: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG(">>> Failed to deinitialize handle: %s", lt_ret_verbose(ret));
         return CKR_GENERAL_ERROR;
     }
     
@@ -836,7 +834,7 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
     if (ulRandomLen % 8 != 0) printf("\n");
     fflush(stdout);
     
-    LOG(">>> C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
+    LT_PKCS11_LOG(">>> C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
     return CKR_OK;
 }
 
@@ -859,21 +857,21 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
  * @return CKR_ARGUMENTS_BAD if pSeed is NULL or ulSeedLen is 0
  */
 CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen) {
-    LOG(">>> C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
+    LT_PKCS11_LOG(">>> C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
         hSession, pSeed, ulSeedLen);
     
     /* Validate parameters */
     if (!pSeed) {
-        LOG(">>> pSeed is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> pSeed is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     if (ulSeedLen == 0) {
-        LOG(">>> ulSeedLen is 0 - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> ulSeedLen is 0 - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
     /* Accept the seed but do nothing - HWRNG doesn't need external seeding */
-    LOG(">>> C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
+    LT_PKCS11_LOG(">>> C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
     return CKR_OK;
 }
 
@@ -912,14 +910,14 @@ CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSee
  * Any missing/extra fields or wrong order will cause crashes!
  */
 CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
-    LOG("========================================");
-    LOG(">>> C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
-    LOG(">>> LOADING TROPIC PKCS#11 LIBRARY");
-    LOG("========================================");
+    LT_PKCS11_LOG("========================================");
+    LT_PKCS11_LOG(">>> C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
+    LT_PKCS11_LOG(">>> LOADING TROPIC PKCS#11 LIBRARY");
+    LT_PKCS11_LOG("========================================");
     
     /* Validate parameter */
     if (!ppFunctionList) {
-        LOG(">>> ppFunctionList is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG(">>> ppFunctionList is NULL - returning CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -1077,12 +1075,12 @@ CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
     *ppFunctionList = &functionList;
     
     /* Log some info about the function pointers (for debugging) */
-    LOG(">>> C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
-    LOG(">>> Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
+    LT_PKCS11_LOG(">>> C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
+    LT_PKCS11_LOG(">>> Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
         functionList.C_Initialize, functionList.C_Finalize, functionList.C_GetInfo);
-    LOG(">>> Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
+    LT_PKCS11_LOG(">>> Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
         functionList.C_OpenSession, functionList.C_CloseSession, functionList.C_CloseAllSessions);
-    LOG(">>> Actual function: C_OpenSession=%p", C_OpenSession);
+    LT_PKCS11_LOG(">>> Actual function: C_OpenSession=%p", C_OpenSession);
     
     return CKR_OK;
 }

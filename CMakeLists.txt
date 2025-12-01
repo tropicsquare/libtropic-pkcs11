@@ -4,6 +4,9 @@ project(libtropic_pkcs11)
 # Enable Position Independent Code for all targets (required for shared library)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Enable logging (use ON/OFF)
+option(LT_PKCS11_LOG_EN "Enable PKCS11 logging" OFF)
+
 # Set path to libtropic (inside libtropic-linux)
 set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
 
@@ -30,3 +33,10 @@ target_include_directories(libtropic_pkcs11 PRIVATE
 
 # Link libtropic with your binary.
 target_link_libraries(libtropic_pkcs11 PRIVATE tropic)
+
+# Convert CMake boolean (ON/OFF) to C preprocessor integer (1/0)
+if(LT_PKCS11_LOG_EN)
+    target_compile_definitions(libtropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=1)
+else()
+    target_compile_definitions(libtropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=0)
+endif()

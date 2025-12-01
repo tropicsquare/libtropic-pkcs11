@@ -70,6 +70,22 @@
 extern "C" {
 #endif
 
+
+/** @brief Dummy macro used when no logging is configured. */
+#define LT_PKCS11_LOG_DISABLED(...)                              \
+    do {                                                         \
+        if (0) {                                                 \
+            /* Validates format string at compile time */        \
+            printf(__VA_ARGS__);                                 \
+        }                                                        \
+    } while (0)
+
+#if LT_PKCS11_LOG_EN
+    #define LT_PKCS11_LOG(...) do { printf(__VA_ARGS__); printf("\n"); } while(0)
+#else
+    #define LT_PKCS11_LOG(...) LT_PKCS11_LOG_DISABLED(__VA_ARGS__)
+#endif
+
 /* ============================================================================
  * PKCS#11 VERSION CONSTANTS
  * ============================================================================
