@@ -18,7 +18,6 @@ add_library(libtropic_pkcs11 SHARED
             src/pkcs11.h
             src/pkcs11.c
             ${PATH_LIBTROPIC}/hal/port/unix/libtropic_port_unix_usb_dongle.c
-	    sh0_keys.c     
     	    )
 
 # Add path to the libtropic's repository root folder.
