@@ -267,6 +267,9 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKR_SLOT_ID_INVALID                     0x00000003  /**< Invalid slot ID */
 #define CKR_GENERAL_ERROR                       0x00000005  /**< Unspecified error */
 #define CKR_ARGUMENTS_BAD                       0x00000007  /**< Invalid argument(s) */
+#define CKR_DEVICE_ERROR                        0x00000030  /**< Hardware/device error */
+#define CKR_DEVICE_MEMORY                       0x00000031  /**< Token memory error */
+#define CKR_DEVICE_REMOVED                      0x00000032  /**< Token was removed */
 #define CKR_FUNCTION_NOT_SUPPORTED              0x00000054  /**< Function not implemented */
 #define CKR_KEY_HANDLE_INVALID                  0x00000060  /**< Invalid key handle */
 #define CKR_KEY_TYPE_INCONSISTENT               0x00000063  /**< Key type doesn't match */
@@ -281,6 +284,10 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKR_CRYPTOKI_NOT_INITIALIZED            0x00000190  /**< C_Initialize not called */
 #define CKR_CRYPTOKI_ALREADY_INITIALIZED        0x00000191  /**< C_Initialize called twice */
 #define CKR_VENDOR_DEFINED                      0x80000000  /**< Start of vendor-defined errors */
+
+/* Special value indicating information is not available */
+#define CK_UNAVAILABLE_INFORMATION              (~0UL)      /**< Value not available/applicable */
+#define CK_EFFECTIVELY_INFINITE                 0           /**< Unlimited (for session counts) */
 
 /* ============================================================================
  * CRYPTOGRAPHIC MECHANISMS
