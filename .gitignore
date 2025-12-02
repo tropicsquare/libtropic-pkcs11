@@ -23,6 +23,7 @@ Makefile
 *.swo
 *~
 .DS_Store
+.venv
 
 # Debug files
 *.dSYM/
