@@ -1,62 +1,7 @@
 /**
  * @file pkcs11.c
  * @brief PKCS#11 Module for TROPIC01 Secure Element - Hardware Random Number Generator
- * 
- * ==================================================================================
- * WHAT IS THIS FILE?
- * ==================================================================================
- * 
- * This file implements a PKCS#11 module (also called "Cryptoki" module) that allows
- * applications to use the TROPIC01 chip's hardware random number generator (HWRNG).
- * 
- * PKCS#11 is a standard API (defined by OASIS) for cryptographic tokens like:
- * - Smart cards
- * - Hardware Security Modules (HSMs)
- * - USB crypto dongles
- * - Secure elements (like TROPIC01)
- * 
- * When compiled, this file becomes a shared library (.so file) that can be loaded
- * by any PKCS#11-compatible application (OpenSSL, Firefox, pkcs11-tool, etc.).
- * 
- * ==================================================================================
- * HOW PKCS#11 WORKS (SIMPLIFIED)
- * ==================================================================================
- * 
- * 1. Application loads our .so library using dlopen()
- * 2. Application calls C_GetFunctionList() to get pointers to all our functions
- * 3. Application calls C_Initialize() to initialize the library
- * 4. Application calls various functions like C_GenerateRandom() to use the token
- * 5. Application calls C_Finalize() when done
- * 
- * ==================================================================================
- * WHAT DOES THIS MODULE DO?
- * ==================================================================================
- * 
- * Main functionality:
- * - C_GenerateRandom(): Gets true random bytes from TROPIC01's hardware RNG
- * - C_GetInfo(): Reads and displays TROPIC01 chip information
- * 
- * The hardware RNG in TROPIC01 uses physical phenomena (thermal noise) to generate
- * true random numbers, which are superior to software pseudo-random generators
- * for cryptographic applications.
- * 
- * ==================================================================================
- * AUTHOR & LICENSE
- * ==================================================================================
- * 
- * Based on libtropic by Tropic Square s.r.o.
- * PKCS#11 integration for hardware RNG access.
- */
-
-/* ==================================================================================
- * INCLUDE FILES
- * ==================================================================================
- * 
- * We need headers for:
- * - PKCS#11 types and constants (pkcs11.h)
- * - Standard C library functions (stdio, string, stdlib, time)
- * - libtropic API for communicating with TROPIC01 chip
- */
+ **/
 
 #include "pkcs11.h"           /* PKCS#11 type definitions (CK_RV, CK_INFO, etc.) */
 #include <stdio.h>            /* printf(), fflush() for debug output */
@@ -112,22 +57,7 @@ static CK_BBOOL initialized = CK_FALSE;
  * CKR_OK (0) means success, other values indicate specific errors.
  */
 
-/**
- * @brief Initialize the PKCS#11 library.
- * 
- * This function MUST be called before any other PKCS#11 function (except
- * C_GetFunctionList). It performs global initialization.
- * 
- * @param pInitArgs Pointer to initialization arguments (CK_C_INITIALIZE_ARGS).
- *                  Can be NULL for default initialization.
- *                  We ignore this parameter in our implementation.
- * 
- * @return CKR_OK on success
- * @return CKR_CRYPTOKI_ALREADY_INITIALIZED if already initialized
- * 
- * PKCS#11 Spec: "If several applications need to use Cryptoki concurrently,
- * they should each call C_Initialize independently."
- */
+
 CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
     LT_PKCS11_LOG(">>> C_Initialize (pInitArgs=%p)", pInitArgs);
     
@@ -144,21 +74,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
     return CKR_OK;
 }
 
-/**
- * @brief Finalize (shut down) the PKCS#11 library.
- * 
- * This function releases all resources and prepares the library for unloading.
- * After calling this, no PKCS#11 functions should be called except
- * C_GetFunctionList and C_Initialize.
- * 
- * @param pReserved Reserved for future use. MUST be NULL in PKCS#11 2.40.
- * 
- * @return CKR_OK on success
- * @return CKR_CRYPTOKI_NOT_INITIALIZED if not initialized
- * 
- * NOTE: In a production implementation, we would close any open sessions
- * and release hardware resources here.
- */
+
 CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
     
@@ -175,24 +91,6 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     return CKR_OK;
 }
 
-/**
- * @brief Get information about the PKCS#11 library.
- * 
- * Returns general information about the Cryptoki library, including:
- * - Cryptoki version (2.40)
- * - Manufacturer ID ("TropicSquare")
- * - Library description ("Tropic PKCS11")
- * 
- * BONUS FEATURE: We also use this function to read and display TROPIC01
- * chip information (firmware versions, chip ID, serial number).
- * This doesn't require a secure session.
- * 
- * @param pInfo Pointer to CK_INFO structure to fill with library info.
- *              The structure has fixed-size char arrays (32/64 bytes).
- * 
- * @return CKR_OK on success
- * @return CKR_ARGUMENTS_BAD if pInfo is NULL
- */
 CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
     LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
     
@@ -234,7 +132,7 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
     /* Step 3: Attach device config to the handle's L2 (Layer 2) structure
      * 
      * libtropic uses a layered architecture:
-     * - L1: Physical layer (SPI, I2C, USB)
+     * - L1: Physical layer (SPI, UART)
      * - L2: Frame layer (packet framing, CRC)
      * - L3: Application layer (commands, responses)
      */
@@ -320,29 +218,6 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
     return CKR_OK;
 }
 
-/**
- * @brief Get list of available slots (token readers/interfaces).
- * 
- * In PKCS#11 terminology:
- * - SLOT: A physical reader or interface where a token can be inserted
- * - TOKEN: The cryptographic device (smart card, HSM, TROPIC01 chip)
- * 
- * Our implementation provides a single slot (ID=1) with TROPIC01 as the token.
- * 
- * This function can be called in two modes:
- * 1. Query mode (pSlotList=NULL): Just return count of available slots
- * 2. Fill mode (pSlotList!=NULL): Fill the array with slot IDs
- * 
- * @param tokenPresent If TRUE, only list slots with tokens present.
- *                     We ignore this since our token is always present.
- * @param pSlotList    Array to fill with slot IDs, or NULL for query mode.
- * @param pulCount     Pointer to slot count. On input (fill mode): size of array.
- *                     On output: number of slots available/returned.
- * 
- * @return CKR_OK on success
- * @return CKR_ARGUMENTS_BAD if pulCount is NULL
- * @return CKR_BUFFER_TOO_SMALL if pSlotList array is too small
- */
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount) {
     LT_PKCS11_LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
         tokenPresent, pSlotList, pulCount);
@@ -373,25 +248,6 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PT
     return CKR_OK;
 }
 
-/**
- * @brief Get information about a specific slot.
- * 
- * Returns details about the slot (reader/interface), including:
- * - Description ("Tropic Slot")
- * - Manufacturer ("TropicSquare")
- * - Flags indicating capabilities
- * 
- * @param slotID The slot ID to query (must be 1 for our implementation)
- * @param pInfo  Pointer to CK_SLOT_INFO structure to fill
- * 
- * @return CKR_OK on success
- * @return CKR_SLOT_ID_INVALID if slotID is not 1
- * @return CKR_ARGUMENTS_BAD if pInfo is NULL
- * 
- * Flags we set:
- * - CKF_TOKEN_PRESENT: There is a token (TROPIC01) in the slot
- * - CKF_HW_SLOT: This is a hardware slot (not software emulation)
- */
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
     LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
@@ -417,24 +273,6 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
     return CKR_OK;
 }
 
-/**
- * @brief Get information about the token (TROPIC01 chip) in a slot.
- * 
- * Returns details about the cryptographic token, including:
- * - Label ("TROPIC-RNG")
- * - Manufacturer ("TropicSquare")
- * - Flags indicating capabilities
- * 
- * @param slotID The slot ID containing the token (must be 1)
- * @param pInfo  Pointer to CK_TOKEN_INFO structure to fill
- * 
- * @return CKR_OK on success
- * @return CKR_SLOT_ID_INVALID if slotID is not 1
- * @return CKR_ARGUMENTS_BAD if pInfo is NULL
- * 
- * Key flag:
- * - CKF_RNG: This token has a hardware Random Number Generator
- */
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
     
@@ -460,30 +298,6 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     return CKR_OK;
 }
 
-/**
- * @brief Open a session with a token.
- * 
- * A session is a logical connection between an application and a token.
- * Sessions are used for cryptographic operations, object management, etc.
- * 
- * Our implementation is simplified:
- * - We always return a fixed session handle (0x12345678)
- * - We don't track sessions (no multi-session support)
- * 
- * @param slotID      Slot ID containing the token (must be 1)
- * @param flags       Session flags (we ignore these)
- *                    - CKF_SERIAL_SESSION: Required for PKCS#11 2.x
- *                    - CKF_RW_SESSION: Read-write session (vs read-only)
- * @param pApplication Application-defined pointer (passed to callbacks)
- * @param Notify      Callback function for session events (we ignore this)
- * @param phSession   Pointer to receive the session handle
- * 
- * @return CKR_OK on success
- * @return CKR_SLOT_ID_INVALID if slotID is not 1
- * @return CKR_ARGUMENTS_BAD if phSession is NULL
- * 
- * TODO: Implement proper session tracking for production use.
- */
 CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
     LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
@@ -509,20 +323,6 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     return CKR_OK;
 }
 
-/**
- * @brief Close a session with a token.
- * 
- * Closes a session and releases associated resources.
- * 
- * Our implementation is simplified - we accept any handle and always succeed.
- * This is because we don't actually track sessions.
- * 
- * @param hSession The session handle to close
- * 
- * @return CKR_OK always (we don't validate the handle)
- * 
- * TODO: Implement proper session validation for production use.
- */
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
     LT_PKCS11_LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
     
@@ -563,36 +363,6 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
 extern uint8_t sh0priv[];
 extern uint8_t sh0pub[];
 
-/**
- * @brief Generate random bytes using TROPIC01's hardware RNG.
- * 
- * ==================================================================================
- * THIS IS THE MAIN FUNCTION OF THIS PKCS#11 MODULE!
- * ==================================================================================
- * 
- * This function retrieves true random bytes from the TROPIC01 chip's hardware
- * random number generator. Hardware RNGs use physical phenomena (thermal noise,
- * quantum effects) to generate true randomness, making them ideal for cryptographic
- * key generation, nonces, and other security-critical applications.
- * 
- * How it works:
- * 1. Open USB connection to TROPIC01
- * 2. Establish encrypted secure session (required to access RNG)
- * 3. Request random bytes from the chip
- * 4. Close session and return data to application
- * 
- * @param hSession    Session handle (we don't validate this)
- * @param pRandomData Pointer to buffer to fill with random bytes
- * @param ulRandomLen Number of random bytes to generate
- * 
- * @return CKR_OK on success
- * @return CKR_ARGUMENTS_BAD if pRandomData is NULL or ulRandomLen is 0
- * @return CKR_GENERAL_ERROR if communication with TROPIC01 fails
- * 
- * IMPORTANT: The secure session establishment takes ~100-500ms, so this function
- * is relatively slow. For high-performance applications, consider caching the
- * session (see improvement suggestions in WHATWASCHANGED.md).
- */
 CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen) {
     LT_PKCS11_LOG(">>> C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
         hSession, pRandomData, ulRandomLen);
@@ -768,24 +538,6 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
     return CKR_OK;
 }
 
-/**
- * @brief Seed the random number generator.
- * 
- * In PKCS#11, applications can provide additional entropy to seed the RNG.
- * However, for a TRUE hardware RNG like TROPIC01, seeding is not necessary
- * (and may not be supported by the hardware).
- * 
- * Our implementation accepts the seed but does nothing with it.
- * This is valid for a HWRNG - the randomness comes from physical sources,
- * not from a seeded algorithm.
- * 
- * @param hSession  Session handle (not validated)
- * @param pSeed     Pointer to seed data
- * @param ulSeedLen Length of seed data in bytes
- * 
- * @return CKR_OK always (we accept but ignore the seed)
- * @return CKR_ARGUMENTS_BAD if pSeed is NULL or ulSeedLen is 0
- */
 CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen) {
     LT_PKCS11_LOG(">>> C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
         hSession, pSeed, ulSeedLen);
@@ -805,40 +557,6 @@ CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSee
     return CKR_OK;
 }
 
-
-/* ==================================================================================
- * FUNCTION LIST - THE HEART OF PKCS#11
- * ==================================================================================
- * 
- * C_GetFunctionList is the MOST IMPORTANT function in PKCS#11.
- * It's the ONLY function that applications call directly (by name).
- * All other functions are called through pointers in the function list.
- * 
- * The function list is a structure (CK_FUNCTION_LIST) containing pointers
- * to every PKCS#11 function. The order of fields is defined by the spec
- * and MUST be exact - any mismatch will cause crashes.
- * 
- * Functions we implement get their actual function pointer.
- * Functions we don't implement get NULL (returning CKR_FUNCTION_NOT_SUPPORTED).
- */
-
-/**
- * @brief Get the list of all PKCS#11 function pointers.
- * 
- * This is typically the first function called by any PKCS#11 application.
- * The application loads our .so library, finds this function by name using
- * dlsym(), calls it to get pointers to all other functions.
- * 
- * @param ppFunctionList Pointer to receive the function list pointer.
- *                       After calling, *ppFunctionList points to our
- *                       static CK_FUNCTION_LIST structure.
- * 
- * @return CKR_OK on success
- * @return CKR_ARGUMENTS_BAD if ppFunctionList is NULL
- * 
- * IMPORTANT: The function list structure must match PKCS#11 2.40 exactly.
- * Any missing/extra fields or wrong order will cause crashes!
- */
 CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
     LT_PKCS11_LOG("========================================");
     LT_PKCS11_LOG(">>> C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
