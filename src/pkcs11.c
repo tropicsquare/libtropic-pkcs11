@@ -38,23 +38,35 @@
  extern uint8_t sh0priv[];
  extern uint8_t sh0pub[];
  
- /* ==================================================================================
-  * GLOBAL STATE
-  * ==================================================================================
-  * 
-  * PKCS#11 requires tracking library and session state across function calls.
-  * 
-  * pkcs_lt_initialized: Whether C_Initialize() has been called
-  * pkcs_lt_session_open: Whether a secure session is active (C_OpenSession called)
-  * pkcs_lt_handle: The libtropic handle - persists between function calls
-  * pkcs_lt_device: USB device configuration - persists between function calls
-  * pkcs_lt_session_handle: The current session handle returned by C_OpenSession
-  */
- static CK_BBOOL pkcs_lt_initialized = CK_FALSE;
- static CK_BBOOL pkcs_lt_session_open = CK_FALSE;
- static lt_handle_t pkcs_lt_handle = {0};
- static lt_dev_unix_usb_dongle_t pkcs_lt_device = {0};
- static CK_SESSION_HANDLE pkcs_lt_session_handle = 0;
+/* ==================================================================================
+ * GLOBAL STATE - Context Structure
+ * ==================================================================================
+ * 
+ * PKCS#11 requires tracking library and session state across function calls.
+ * All global state is wrapped in a single context structure for better organization.
+ * 
+ * initialized: Whether C_Initialize() has been called
+ * session_open: Whether a secure session is active (C_OpenSession called)
+ * lt_handle: The libtropic handle - persists between function calls
+ * lt_device: USB device configuration - persists between function calls
+ * session_handle: The current session handle returned by C_OpenSession
+ */
+typedef struct {
+    CK_BBOOL initialized;                   /* Whether library is initialized */
+    CK_BBOOL session_open;                  /* Whether a session is open */
+    lt_handle_t lt_handle;                  /* libtropic handle */
+    lt_dev_unix_usb_dongle_t lt_device;     /* USB device configuration */
+    CK_SESSION_HANDLE session_handle;       /* Current session handle */
+} lt_pkcs11_ctx_t;
+
+/* Single global context instance */
+static lt_pkcs11_ctx_t pkcs11_ctx = {
+    .initialized = CK_FALSE,
+    .session_open = CK_FALSE,
+    .lt_handle = {0},
+    .lt_device = {0},
+    .session_handle = 0
+};
  
  
  
@@ -82,7 +94,7 @@
      LT_PKCS11_LOG(">>> C_Initialize (pInitArgs=%p)", pInitArgs);
      
      /* Check if already initialized - PKCS#11 forbids double initialization */
-     if (pkcs_lt_initialized) {
+     if (pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Already initialized - returning CKR_CRYPTOKI_ALREADY_INITIALIZED");
          return CKR_CRYPTOKI_ALREADY_INITIALIZED;
      }
@@ -102,12 +114,12 @@
       * 
       * rng_seed: Seed for software RNG (used as fallback, not for our HWRNG)
       */
-     memset(&pkcs_lt_device, 0, sizeof(pkcs_lt_device));
-     strncpy(pkcs_lt_device.dev_path, "/dev/ttyACM0", sizeof(pkcs_lt_device.dev_path) - 1);
-     pkcs_lt_device.baud_rate = 115200;
-     pkcs_lt_device.rng_seed = (unsigned int)time(NULL);
+     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
+     strncpy(pkcs11_ctx.lt_device.dev_path, "/dev/ttyACM0", sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
+     pkcs11_ctx.lt_device.baud_rate = 115200;
+     pkcs11_ctx.lt_device.rng_seed = (unsigned int)time(NULL);
      
-     LT_PKCS11_LOG(">>> USB device configured: %s @ %d baud", pkcs_lt_device.dev_path, pkcs_lt_device.baud_rate);
+     LT_PKCS11_LOG(">>> USB device configured: %s @ %d baud", pkcs11_ctx.lt_device.dev_path, pkcs11_ctx.lt_device.baud_rate);
      
      /* =========================================================================
       * STEP 2: INITIALIZE LIBTROPIC HANDLE
@@ -120,8 +132,8 @@
       * - L2: Frame layer (packet framing, CRC)
       * - L3: Application layer (commands, responses)
       */
-     memset(&pkcs_lt_handle, 0, sizeof(pkcs_lt_handle));
-     pkcs_lt_handle.l2.device = &pkcs_lt_device;
+     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
+     pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
      
      /* =========================================================================
       * STEP 3: INITIALIZE COMMUNICATION WITH TROPIC01
@@ -133,7 +145,7 @@
       * - Sets up communication buffers
       */
      LT_PKCS11_LOG(">>> Initializing libtropic handle...");
-     lt_ret_t ret = lt_init(&pkcs_lt_handle);
+     lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
      if (ret != LT_OK) {
          LT_PKCS11_LOG(">>> Failed to initialize libtropic: %s", lt_ret_verbose(ret));
          return CKR_DEVICE_ERROR;
@@ -142,9 +154,9 @@
      LT_PKCS11_LOG(">>> TROPIC01 communication initialized successfully");
      
      /* Mark as initialized */
-     pkcs_lt_initialized = CK_TRUE;
-     pkcs_lt_session_open = CK_FALSE;
-     pkcs_lt_session_handle = 0;
+     pkcs11_ctx.initialized = CK_TRUE;
+     pkcs11_ctx.session_open = CK_FALSE;
+     pkcs11_ctx.session_handle = 0;
      
      LT_PKCS11_LOG(">>> C_Initialize OK");
      return CKR_OK;
@@ -155,7 +167,7 @@
      LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
      
      /* Can't finalize if not initialized */
-     if (!pkcs_lt_initialized) {
+     if (!pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
@@ -167,15 +179,15 @@
       * If a secure session is still active, abort it first.
       * This ensures clean shutdown even if C_CloseSession wasn't called.
       */
-     if (pkcs_lt_session_open) {
+     if (pkcs11_ctx.session_open) {
          LT_PKCS11_LOG(">>> Aborting open secure session...");
-         lt_ret_t ret = lt_session_abort(&pkcs_lt_handle);
+         lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
          if (ret != LT_OK) {
              LT_PKCS11_LOG(">>> Warning: Failed to abort session: %s", lt_ret_verbose(ret));
              /* Continue with finalization anyway */
          }
-         pkcs_lt_session_open = CK_FALSE;
-         pkcs_lt_session_handle = 0;
+         pkcs11_ctx.session_open = CK_FALSE;
+         pkcs11_ctx.session_handle = 0;
      }
      
      /* =========================================================================
@@ -188,16 +200,16 @@
       * - Resets handle state
       */
      LT_PKCS11_LOG(">>> Deinitializing libtropic...");
-     lt_ret_t ret = lt_deinit(&pkcs_lt_handle);
+     lt_ret_t ret = lt_deinit(&pkcs11_ctx.lt_handle);
      if (ret != LT_OK) {
          LT_PKCS11_LOG(">>> Warning: Failed to deinitialize libtropic: %s", lt_ret_verbose(ret));
          /* Continue with finalization anyway */
      }
      
      /* Clear global state */
-     memset(&pkcs_lt_handle, 0, sizeof(pkcs_lt_handle));
-     memset(&pkcs_lt_device, 0, sizeof(pkcs_lt_device));
-     pkcs_lt_initialized = CK_FALSE;
+     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
+     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
+     pkcs11_ctx.initialized = CK_FALSE;
      
      LT_PKCS11_LOG(">>> C_Finalize OK");
      return CKR_OK;
@@ -216,7 +228,7 @@
       * If the library is initialized, read chip info using the global handle.
       * This does NOT require a secure session - chip freely provides this info.
       */
-     if (pkcs_lt_initialized) {
+     if (pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Reading TROPIC01 chip info...");
          
          /* Read RISC-V firmware version
@@ -225,7 +237,7 @@
           * Version format: major.minor.patch.build (stored in reverse order)
           */
          uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs_lt_handle, fw_ver);
+         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
          if (ret == LT_OK) {
              LT_PKCS11_LOG(">>> RISC-V FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
          } else {
@@ -237,7 +249,7 @@
           * SPECT is the cryptographic coprocessor inside TROPIC01.
           * It handles all crypto operations (RNG, ECC, AES, etc.)
           */
-         ret = lt_get_info_spect_fw_ver(&pkcs_lt_handle, fw_ver);
+         ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
          if (ret == LT_OK) {
              LT_PKCS11_LOG(">>> SPECT FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
          } else {
@@ -255,7 +267,7 @@
           * - And more...
           */
          struct lt_chip_id_t chip_id = {0};
-         ret = lt_get_info_chip_id(&pkcs_lt_handle, &chip_id);
+         ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
          if (ret == LT_OK) {
              LT_PKCS11_LOG(">>> Chip ID:");
              lt_print_chip_id(&chip_id, printf);
@@ -341,16 +353,16 @@
      pInfo->flags = CKF_TOKEN_PRESENT | CKF_HW_SLOT;
      
      /* Read firmware version from chip if initialized */
-     if (pkcs_lt_initialized) {
+     if (pkcs11_ctx.initialized) {
          uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs_lt_handle, fw_ver);
+         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
          if (ret == LT_OK) {
              /* firmwareVersion: RISC-V FW (major.minor) */
              pInfo->firmwareVersion.major = fw_ver[3];
              pInfo->firmwareVersion.minor = fw_ver[2];
          }
          /* hardwareVersion: Use SPECT FW as hardware indicator */
-         ret = lt_get_info_spect_fw_ver(&pkcs_lt_handle, fw_ver);
+         ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
          if (ret == LT_OK) {
              pInfo->hardwareVersion.major = fw_ver[3];
              pInfo->hardwareVersion.minor = fw_ver[2];
@@ -389,9 +401,9 @@
      
      /* Session limits */
      pInfo->ulMaxSessionCount = 1;      /* We support only one session at a time */
-     pInfo->ulSessionCount = pkcs_lt_session_open ? 1 : 0;
+     pInfo->ulSessionCount = pkcs11_ctx.session_open ? 1 : 0;
      pInfo->ulMaxRwSessionCount = 1;
-     pInfo->ulRwSessionCount = pkcs_lt_session_open ? 1 : 0;
+     pInfo->ulRwSessionCount = pkcs11_ctx.session_open ? 1 : 0;
      
      /* PIN is not used - we use pairing keys instead */
      pInfo->ulMaxPinLen = 0;
@@ -404,10 +416,10 @@
      pInfo->ulFreePrivateMemory = CK_UNAVAILABLE_INFORMATION;
      
      /* Read chip info and populate dynamic fields */
-     if (pkcs_lt_initialized) {
+     if (pkcs11_ctx.initialized) {
          /* Get firmware versions */
          uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs_lt_handle, fw_ver);
+         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
          if (ret == LT_OK) {
              pInfo->firmwareVersion.major = fw_ver[3];
              pInfo->firmwareVersion.minor = fw_ver[2];
@@ -415,7 +427,7 @@
          
          /* Get chip ID for label, model, serial number, etc. */
          struct lt_chip_id_t chip_id = {0};
-         ret = lt_get_info_chip_id(&pkcs_lt_handle, &chip_id);
+         ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
          if (ret == LT_OK) {
              /* Hardware version from chip_id_ver array [major.minor.patch.build] */
              pInfo->hardwareVersion.major = chip_id.chip_id_ver[0];
@@ -474,7 +486,7 @@
          slotID, flags, pApplication, Notify, phSession);
      
      /* Library must be initialized first */
-     if (!pkcs_lt_initialized) {
+     if (!pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
@@ -492,9 +504,9 @@
      }
      
      /* Check if session is already open - we only support one session at a time */
-     if (pkcs_lt_session_open) {
+     if (pkcs11_ctx.session_open) {
          LT_PKCS11_LOG(">>> Session already open - returning existing session handle");
-         *phSession = pkcs_lt_session_handle;
+         *phSession = pkcs11_ctx.session_handle;
          return CKR_OK;
      }
      
@@ -513,7 +525,7 @@
       * 4. Verifies chip authenticity using stored keys
       * 
       * Parameters:
-      * - pkcs_lt_handle: Our global handle
+      * - pkcs11_ctx.lt_handle: Our global handle
       * - sh0priv: Our X25519 private key (32 bytes)
       * - sh0pub: Chip's X25519 public key (32 bytes)
       * - TR01_PAIRING_KEY_SLOT_INDEX_0: Which key slot to use (0-3)
@@ -522,7 +534,7 @@
       * full access, while others may be restricted.
       */
      LT_PKCS11_LOG(">>> Starting Secure Session with key slot %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
-     lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs_lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+     lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
      if (ret != LT_OK) {
          LT_PKCS11_LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
          return CKR_DEVICE_ERROR;
@@ -531,9 +543,9 @@
      LT_PKCS11_LOG(">>> Secure session established successfully");
      
      /* Generate a session handle and mark session as open */
-     pkcs_lt_session_handle = 0x12345678;  /* Fixed handle for simplicity */
-     pkcs_lt_session_open = CK_TRUE;
-     *phSession = pkcs_lt_session_handle;
+     pkcs11_ctx.session_handle = 0x12345678;  /* Fixed handle for simplicity */
+     pkcs11_ctx.session_open = CK_TRUE;
+     *phSession = pkcs11_ctx.session_handle;
      
      LT_PKCS11_LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
      return CKR_OK;
@@ -543,21 +555,21 @@
      LT_PKCS11_LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
      
      /* Library must be initialized */
-     if (!pkcs_lt_initialized) {
+     if (!pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
      
      /* Check if session is open */
-     if (!pkcs_lt_session_open) {
+     if (!pkcs11_ctx.session_open) {
          LT_PKCS11_LOG(">>> No session open - returning CKR_SESSION_HANDLE_INVALID");
          return CKR_SESSION_HANDLE_INVALID;
      }
      
      /* Verify session handle matches */
-     if (hSession != pkcs_lt_session_handle) {
+     if (hSession != pkcs11_ctx.session_handle) {
          LT_PKCS11_LOG(">>> Invalid session handle 0x%lx (expected 0x%lx) - returning CKR_SESSION_HANDLE_INVALID", 
-             hSession, pkcs_lt_session_handle);
+             hSession, pkcs11_ctx.session_handle);
          return CKR_SESSION_HANDLE_INVALID;
      }
      
@@ -571,15 +583,15 @@
       * - Allows new sessions to be established
       */
      LT_PKCS11_LOG(">>> Aborting Secure Session...");
-     lt_ret_t ret = lt_session_abort(&pkcs_lt_handle);
+     lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
      if (ret != LT_OK) {
          LT_PKCS11_LOG(">>> Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
          /* Continue anyway - mark session as closed */
      }
      
      /* Mark session as closed */
-     pkcs_lt_session_open = CK_FALSE;
-     pkcs_lt_session_handle = 0;
+     pkcs11_ctx.session_open = CK_FALSE;
+     pkcs11_ctx.session_handle = 0;
      
      LT_PKCS11_LOG(">>> C_CloseSession OK");
      return CKR_OK;
@@ -607,21 +619,21 @@
       */
      
      /* Library must be initialized */
-     if (!pkcs_lt_initialized) {
+     if (!pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
      
      /* Session must be open (secure session established) */
-     if (!pkcs_lt_session_open) {
+     if (!pkcs11_ctx.session_open) {
          LT_PKCS11_LOG(">>> No session open - returning CKR_SESSION_HANDLE_INVALID");
          return CKR_SESSION_HANDLE_INVALID;
      }
      
      /* Verify session handle */
-     if (hSession != pkcs_lt_session_handle) {
+     if (hSession != pkcs11_ctx.session_handle) {
          LT_PKCS11_LOG(">>> Invalid session handle 0x%lx (expected 0x%lx) - returning CKR_SESSION_HANDLE_INVALID", 
-             hSession, pkcs_lt_session_handle);
+             hSession, pkcs11_ctx.session_handle);
          return CKR_SESSION_HANDLE_INVALID;
      }
      
@@ -659,7 +671,7 @@
                                TR01_RANDOM_VALUE_GET_LEN_MAX : (uint16_t)remaining;
          
          /* Request random bytes from the chip */
-         lt_ret_t ret = lt_random_value_get(&pkcs_lt_handle, ptr, chunk_size);
+         lt_ret_t ret = lt_random_value_get(&pkcs11_ctx.lt_handle, ptr, chunk_size);
          if (ret != LT_OK) {
              LT_PKCS11_LOG(">>> Failed to get random bytes: %s", lt_ret_verbose(ret));
              return CKR_DEVICE_ERROR;
