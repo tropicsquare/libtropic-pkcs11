@@ -422,76 +422,84 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
      return CKR_OK;
  }
  
- CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
-                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
-     LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
-         slotID, flags, pApplication, Notify, phSession);
-     
-     /* Library must be initialized first */
-     if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
-         return CKR_CRYPTOKI_NOT_INITIALIZED;
-     }
-     
-     /* We only support slot ID 1 */
-     if (slotID != 1) {
-         LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
-         return CKR_SLOT_ID_INVALID;
-     }
-     
-     /* phSession is required - we need somewhere to return the handle */
-     if (!phSession) {
-         LT_PKCS11_LOG(">>> phSession is NULL - returning CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     /* Check if session is already open - we only support one session at a time */
-     if (pkcs11_ctx.session_open) {
-         LT_PKCS11_LOG(">>> Session already open - returning existing session handle");
-         *phSession = pkcs11_ctx.session_handle;
-         return CKR_OK;
-     }
-     
-     /* =========================================================================
-      * ESTABLISH SECURE SESSION WITH TROPIC01
-      * =========================================================================
-      * 
-      * TROPIC01 requires an authenticated, encrypted session to access sensitive
-      * operations like the hardware RNG. This is a security feature - it ensures
-      * only authorized hosts can use the chip's cryptographic capabilities.
-      * 
-      * lt_verify_chip_and_start_secure_session() performs:
-      * 1. X25519 key exchange (Diffie-Hellman) to establish shared secret
-      * 2. Derives session encryption keys using HKDF
-      * 3. Establishes AES-GCM encrypted channel
-      * 4. Verifies chip authenticity using stored keys
-      * 
-      * Parameters:
-      * - pkcs11_ctx.lt_handle: Our global handle
-      * - sh0priv: Our X25519 private key (32 bytes)
-      * - sh0pub: Chip's X25519 public key (32 bytes)
-      * - TR01_PAIRING_KEY_SLOT_INDEX_0: Which key slot to use (0-3)
-      * 
-      * Key slots have different access permissions - slot 0 typically has
-      * full access, while others may be restricted.
-      */
-     LT_PKCS11_LOG(">>> Starting Secure Session with key slot %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
-     lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
-     if (ret != LT_OK) {
-         LT_PKCS11_LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
-         return CKR_DEVICE_ERROR;
-     }
-     
-     LT_PKCS11_LOG(">>> Secure session established successfully");
-     
-     /* Generate a session handle and mark session as open */
-     pkcs11_ctx.session_handle = 0x12345678;  /* Fixed handle for simplicity */
-     pkcs11_ctx.session_open = CK_TRUE;
-     *phSession = pkcs11_ctx.session_handle;
-     
-     LT_PKCS11_LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
-     return CKR_OK;
- }
+CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
+                    CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
+    LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
+        slotID, flags, pApplication, Notify, phSession);
+    
+    (void)pApplication;  /* Unused - we don't support notifications */
+    (void)Notify;        /* Unused - we don't support notifications */
+    
+    /* Library must be initialized first */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* We only support slot ID 1 */
+    if (slotID != 1) {
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        return CKR_SLOT_ID_INVALID;
+    }
+    
+    /* phSession is required - we need somewhere to return the handle */
+    if (!phSession) {
+        LT_PKCS11_LOG(">>> phSession is NULL - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* CKF_SERIAL_SESSION must be set for legacy reasons (PKCS#11 v2.40 spec) */
+    if (!(flags & CKF_SERIAL_SESSION)) {
+        LT_PKCS11_LOG(">>> CKF_SERIAL_SESSION not set - returning CKR_SESSION_PARALLEL_NOT_SUPPORTED");
+        return CKR_SESSION_PARALLEL_NOT_SUPPORTED;
+    }
+    
+    /* Check if session is already open - we only support one session at a time */
+    if (pkcs11_ctx.session_open) {
+        LT_PKCS11_LOG(">>> Session already open - returning CKR_SESSION_COUNT");
+        return CKR_SESSION_COUNT;
+    }
+    
+    /* =========================================================================
+     * ESTABLISH SECURE SESSION WITH TROPIC01
+     * =========================================================================
+     * 
+     * TROPIC01 requires an authenticated, encrypted session to access sensitive
+     * operations like the hardware RNG. This is a security feature - it ensures
+     * only authorized hosts can use the chip's cryptographic capabilities.
+     * 
+     * lt_verify_chip_and_start_secure_session() performs:
+     * 1. X25519 key exchange (Diffie-Hellman) to establish shared secret
+     * 2. Derives session encryption keys using HKDF
+     * 3. Establishes AES-GCM encrypted channel
+     * 4. Verifies chip authenticity using stored keys
+     * 
+     * Parameters:
+     * - pkcs11_ctx.lt_handle: Our global handle
+     * - sh0priv: Our X25519 private key (32 bytes)
+     * - sh0pub: Chip's X25519 public key (32 bytes)
+     * - TR01_PAIRING_KEY_SLOT_INDEX_0: Which key slot to use (0-3)
+     * 
+     * Key slots have different access permissions - slot 0 typically has
+     * full access, while others may be restricted.
+     */
+    LT_PKCS11_LOG(">>> Starting Secure Session with key slot %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
+    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    LT_PKCS11_LOG(">>> Secure session established successfully");
+    
+    /* Use pointer to lt_handle as session handle - allows functions to cast back */
+    pkcs11_ctx.session_handle = (CK_SESSION_HANDLE)&pkcs11_ctx.lt_handle;
+    pkcs11_ctx.session_open = CK_TRUE;
+    *phSession = pkcs11_ctx.session_handle;
+    
+    LT_PKCS11_LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
+    return CKR_OK;
+}
  
  CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
      LT_PKCS11_LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
