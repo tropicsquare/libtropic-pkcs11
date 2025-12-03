@@ -39,6 +39,26 @@
  extern uint8_t sh0pub[];
  
 /* ==================================================================================
+ * OBJECT HANDLE SCHEME
+ * ==================================================================================
+ * 
+ * Object handles encode the object type and slot index:
+ *   Handle = (TYPE << 16) | SLOT_INDEX
+ * 
+ * Types:
+ *   0x0001 = R-MEM Data Object (CKO_DATA)
+ * 
+ * R-MEM has 512 slots (0-511), each can store 1-444 bytes.
+ */
+#define PKCS11_HANDLE_TYPE_RMEM_DATA    0x0001
+
+#define PKCS11_MAKE_HANDLE(type, slot)  (((CK_OBJECT_HANDLE)(type) << 16) | (slot))
+#define PKCS11_HANDLE_GET_TYPE(h)       (((h) >> 16) & 0xFFFF)
+#define PKCS11_HANDLE_GET_SLOT(h)       ((h) & 0xFFFF)
+#define PKCS11_IS_VALID_RMEM_HANDLE(h)  (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_RMEM_DATA && \
+                                         PKCS11_HANDLE_GET_SLOT(h) <= TR01_R_MEM_DATA_SLOT_MAX)
+
+/* ==================================================================================
  * GLOBAL STATE - Context Structure
  * ==================================================================================
  * 
@@ -50,6 +70,11 @@
  * lt_handle: The libtropic handle - persists between function calls
  * lt_device: USB device configuration - persists between function calls
  * session_handle: The current session handle returned by C_OpenSession
+ * 
+ * Find operation state:
+ * find_active: Whether a C_FindObjectsInit is in progress
+ * find_class: Object class being searched for
+ * find_slot_index: Current R-MEM slot being enumerated
  */
 typedef struct {
     CK_BBOOL initialized;                   /* Whether library is initialized */
@@ -57,6 +82,11 @@ typedef struct {
     lt_handle_t lt_handle;                  /* libtropic handle */
     lt_dev_unix_usb_dongle_t lt_device;     /* USB device configuration */
     CK_SESSION_HANDLE session_handle;       /* Current session handle */
+    
+    /* Find operation state */
+    CK_BBOOL find_active;                   /* C_FindObjectsInit in progress */
+    CK_OBJECT_CLASS find_class;             /* Class being searched (CKO_DATA, etc.) */
+    uint16_t find_slot_index;               /* Current R-MEM slot for enumeration */
 } lt_pkcs11_ctx_t;
 
 /* Single global context instance */
@@ -65,7 +95,10 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
     .session_open = CK_FALSE,
     .lt_handle = {0},
     .lt_device = {0},
-    .session_handle = 0
+    .session_handle = 0,
+    .find_active = CK_FALSE,
+    .find_class = 0,
+    .find_slot_index = 0
 };
  
  
@@ -569,14 +602,414 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
      pkcs11_ctx.session_open = CK_FALSE;
      pkcs11_ctx.session_handle = 0;
      
-     LT_PKCS11_LOG(">>> C_CloseSession OK");
-     return CKR_OK;
- }
- 
- 
- /* ==================================================================================
-  * RANDOM NUMBER GENERATION FUNCTIONS
-  * ==================================================================================
+    LT_PKCS11_LOG(">>> C_CloseSession OK");
+    return CKR_OK;
+}
+
+
+/* ==================================================================================
+ * OBJECT MANAGEMENT FUNCTIONS
+ * ==================================================================================
+ * 
+ * These functions implement storage and retrieval of data objects using TROPIC01's
+ * R-MEM (Read/Write Memory). R-MEM provides 512 slots (0-511), each storing 1-444 bytes.
+ * 
+ * PKCS#11 Object Type Mapping:
+ * - CKO_DATA → R-MEM data slots
+ * 
+ * Object handles encode the type and slot: handle = (type << 16) | slot_index
+ */
+
+CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
+                     CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject) {
+    LT_PKCS11_LOG(">>> C_CreateObject (hSession=0x%lx, pTemplate=%p, ulCount=%lu, phObject=%p)",
+        hSession, pTemplate, ulCount, phObject);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate parameters */
+    if (!pTemplate || ulCount == 0 || !phObject) {
+        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Parse template to find required attributes */
+    CK_OBJECT_CLASS obj_class = CK_UNAVAILABLE_INFORMATION;
+    CK_BYTE_PTR data_value = NULL;
+    CK_ULONG data_len = 0;
+    CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
+    
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        switch (pTemplate[i].type) {
+            case CKA_CLASS:
+                if (pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
+                    obj_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+                }
+                break;
+            case CKA_VALUE:
+                data_value = (CK_BYTE_PTR)pTemplate[i].pValue;
+                data_len = pTemplate[i].ulValueLen;
+                break;
+            case CKA_ID:
+                /* Use CKA_ID as the slot index */
+                if (pTemplate[i].ulValueLen >= sizeof(CK_ULONG)) {
+                    slot_id = *(CK_ULONG*)pTemplate[i].pValue;
+                } else if (pTemplate[i].ulValueLen == sizeof(uint16_t)) {
+                    slot_id = *(uint16_t*)pTemplate[i].pValue;
+                } else if (pTemplate[i].ulValueLen == sizeof(uint8_t)) {
+                    slot_id = *(uint8_t*)pTemplate[i].pValue;
+                }
+                break;
+            default:
+                /* Ignore other attributes */
+                break;
+        }
+    }
+    
+    /* We only support CKO_DATA objects */
+    if (obj_class != CKO_DATA) {
+        LT_PKCS11_LOG(">>> Unsupported object class 0x%lx - returning CKR_ATTRIBUTE_VALUE_INVALID", obj_class);
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    
+    /* CKA_VALUE is required for data objects */
+    if (!data_value || data_len == 0) {
+        LT_PKCS11_LOG(">>> CKA_VALUE missing or empty - returning CKR_TEMPLATE_INCOMPLETE");
+        return CKR_TEMPLATE_INCOMPLETE;
+    }
+    
+    /* Validate data size */
+    if (data_len < TR01_R_MEM_DATA_SIZE_MIN || data_len > TR01_R_MEM_DATA_SIZE_MAX) {
+        LT_PKCS11_LOG(">>> Data size %lu out of range [%d, %d] - returning CKR_ATTRIBUTE_VALUE_INVALID",
+            data_len, TR01_R_MEM_DATA_SIZE_MIN, TR01_R_MEM_DATA_SIZE_MAX);
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    
+    /* If no slot specified, find first empty slot */
+    if (slot_id == CK_UNAVAILABLE_INFORMATION) {
+        uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
+        uint16_t read_size;
+        CK_BBOOL found = CK_FALSE;
+        
+        for (uint16_t i = 0; i <= TR01_R_MEM_DATA_SLOT_MAX; i++) {
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, i, temp_buf, sizeof(temp_buf), &read_size);
+            if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
+                slot_id = i;
+                found = CK_TRUE;
+                LT_PKCS11_LOG(">>> Found empty slot %lu", slot_id);
+                break;
+            }
+        }
+        
+        if (!found) {
+            LT_PKCS11_LOG(">>> No empty R-MEM slots available - returning CKR_DEVICE_MEMORY");
+            return CKR_DEVICE_MEMORY;
+        }
+    }
+    
+    /* Validate slot ID */
+    if (slot_id > TR01_R_MEM_DATA_SLOT_MAX) {
+        LT_PKCS11_LOG(">>> Slot ID %lu exceeds max %d - returning CKR_ATTRIBUTE_VALUE_INVALID",
+            slot_id, TR01_R_MEM_DATA_SLOT_MAX);
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    
+    /* Write data to R-MEM */
+    LT_PKCS11_LOG(">>> Writing %lu bytes to R-MEM slot %lu", data_len, slot_id);
+    lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value, (uint16_t)data_len);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG(">>> Failed to write R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    /* Return object handle */
+    *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot_id);
+    
+    LT_PKCS11_LOG(">>> C_CreateObject OK (handle=0x%lx, slot=%lu)", *phObject, slot_id);
+    return CKR_OK;
+}
+
+CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject) {
+    LT_PKCS11_LOG(">>> C_DestroyObject (hSession=0x%lx, hObject=0x%lx)", hSession, hObject);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate object handle */
+    if (!PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+        LT_PKCS11_LOG(">>> Invalid object handle - returning CKR_OBJECT_HANDLE_INVALID");
+        return CKR_OBJECT_HANDLE_INVALID;
+    }
+    
+    uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
+    
+    /* Erase R-MEM slot */
+    LT_PKCS11_LOG(">>> Erasing R-MEM slot %u", slot);
+    lt_ret_t ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG(">>> Failed to erase R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    LT_PKCS11_LOG(">>> C_DestroyObject OK");
+    return CKR_OK;
+}
+
+CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
+                          CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
+    LT_PKCS11_LOG(">>> C_GetAttributeValue (hSession=0x%lx, hObject=0x%lx, pTemplate=%p, ulCount=%lu)",
+        hSession, hObject, pTemplate, ulCount);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate parameters */
+    if (!pTemplate || ulCount == 0) {
+        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Validate object handle */
+    if (!PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+        LT_PKCS11_LOG(">>> Invalid object handle - returning CKR_OBJECT_HANDLE_INVALID");
+        return CKR_OBJECT_HANDLE_INVALID;
+    }
+    
+    uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
+    
+    /* Read data from R-MEM */
+    uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
+    uint16_t data_size = 0;
+    lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf, sizeof(data_buf), &data_size);
+    if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
+        LT_PKCS11_LOG(">>> Slot %u is empty - returning CKR_OBJECT_HANDLE_INVALID", slot);
+        return CKR_OBJECT_HANDLE_INVALID;
+    }
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG(">>> Failed to read R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    CK_RV rv = CKR_OK;
+    
+    /* Fill in requested attributes */
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        switch (pTemplate[i].type) {
+            case CKA_CLASS: {
+                CK_OBJECT_CLASS obj_class = CKO_DATA;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_VALUE:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = data_size;
+                } else if (pTemplate[i].ulValueLen >= data_size) {
+                    memcpy(pTemplate[i].pValue, data_buf, data_size);
+                    pTemplate[i].ulValueLen = data_size;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            case CKA_ID: {
+                /* Return slot ID */
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(uint16_t);
+                } else if (pTemplate[i].ulValueLen >= sizeof(uint16_t)) {
+                    memcpy(pTemplate[i].pValue, &slot, sizeof(uint16_t));
+                    pTemplate[i].ulValueLen = sizeof(uint16_t);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            default:
+                /* Unknown attribute */
+                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                break;
+        }
+    }
+    
+    LT_PKCS11_LOG(">>> C_GetAttributeValue returning 0x%lx", rv);
+    return rv;
+}
+
+CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
+    LT_PKCS11_LOG(">>> C_FindObjectsInit (hSession=0x%lx, pTemplate=%p, ulCount=%lu)",
+        hSession, pTemplate, ulCount);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Check if find operation already active */
+    if (pkcs11_ctx.find_active) {
+        LT_PKCS11_LOG(">>> Find operation already active - returning CKR_OPERATION_ACTIVE");
+        return CKR_OPERATION_ACTIVE;
+    }
+    
+    /* Parse template to find object class filter */
+    CK_OBJECT_CLASS find_class = CKO_DATA;  /* Default to CKO_DATA */
+    
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
+            find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+        }
+    }
+    
+    /* We only support CKO_DATA */
+    if (find_class != CKO_DATA) {
+        LT_PKCS11_LOG(">>> Only CKO_DATA supported, requested class 0x%lx", find_class);
+        /* Still allow the find but it will return no objects */
+    }
+    
+    /* Initialize find state */
+    pkcs11_ctx.find_active = CK_TRUE;
+    pkcs11_ctx.find_class = find_class;
+    pkcs11_ctx.find_slot_index = 0;
+    
+    LT_PKCS11_LOG(">>> C_FindObjectsInit OK (searching for class 0x%lx)", find_class);
+    return CKR_OK;
+}
+
+CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
+                    CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount) {
+    LT_PKCS11_LOG(">>> C_FindObjects (hSession=0x%lx, phObject=%p, ulMaxObjectCount=%lu, pulObjectCount=%p)",
+        hSession, phObject, ulMaxObjectCount, pulObjectCount);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Check if find operation is active */
+    if (!pkcs11_ctx.find_active) {
+        LT_PKCS11_LOG(">>> No find operation active - returning CKR_OPERATION_NOT_INITIALIZED");
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    
+    /* Validate parameters */
+    if (!phObject || !pulObjectCount) {
+        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    *pulObjectCount = 0;
+    
+    /* Only search for CKO_DATA objects */
+    if (pkcs11_ctx.find_class != CKO_DATA) {
+        LT_PKCS11_LOG(">>> No objects found (unsupported class)");
+        return CKR_OK;
+    }
+    
+    /* Scan R-MEM slots for non-empty entries */
+    uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
+    uint16_t read_size;
+    
+    while (pkcs11_ctx.find_slot_index <= TR01_R_MEM_DATA_SLOT_MAX && *pulObjectCount < ulMaxObjectCount) {
+        uint16_t slot = pkcs11_ctx.find_slot_index++;
+        
+        lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf, sizeof(temp_buf), &read_size);
+        if (ret == LT_OK) {
+            /* Found a non-empty slot */
+            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
+            (*pulObjectCount)++;
+            LT_PKCS11_LOG(">>> Found object at slot %u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
+        }
+        /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
+    }
+    
+    LT_PKCS11_LOG(">>> C_FindObjects OK (found %lu objects)", *pulObjectCount);
+    return CKR_OK;
+}
+
+CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
+    LT_PKCS11_LOG(">>> C_FindObjectsFinal (hSession=0x%lx)", hSession);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Check if find operation is active */
+    if (!pkcs11_ctx.find_active) {
+        LT_PKCS11_LOG(">>> No find operation active - returning CKR_OPERATION_NOT_INITIALIZED");
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    
+    /* Clear find state */
+    pkcs11_ctx.find_active = CK_FALSE;
+    pkcs11_ctx.find_class = 0;
+    pkcs11_ctx.find_slot_index = 0;
+    
+    LT_PKCS11_LOG(">>> C_FindObjectsFinal OK");
+    return CKR_OK;
+}
+
+
+/* ==================================================================================
+ * RANDOM NUMBER GENERATION FUNCTIONS
+ * ==================================================================================
   * 
   * This is the main functionality of this PKCS#11 module!
   * 
@@ -759,19 +1192,20 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
          .C_Login = NULL,                        /* Log in to token (not implemented) */
          .C_Logout = NULL,                       /* Log out from token (not implemented) */
          
-         /* =====================================================================
-          * OBJECT MANAGEMENT
-          * Functions for managing objects (keys, certs, data) on the token.
-          * ===================================================================== */
-         .C_CreateObject = NULL,                 /* Create an object (not implemented) */
-         .C_CopyObject = NULL,                   /* Copy an object (not implemented) */
-         .C_DestroyObject = NULL,                /* Delete an object (not implemented) */
-         .C_GetObjectSize = NULL,                /* Get object size (not implemented) */
-         .C_GetAttributeValue = NULL,            /* Get object attributes (not implemented) */
-         .C_SetAttributeValue = NULL,            /* Set object attributes (not implemented) */
-         .C_FindObjectsInit = NULL,              /* Start object search (not implemented) */
-         .C_FindObjects = NULL,                  /* Continue object search (not implemented) */
-         .C_FindObjectsFinal = NULL,             /* End object search (not implemented) */
+        /* =====================================================================
+         * OBJECT MANAGEMENT
+         * Functions for managing objects (keys, certs, data) on the token.
+         * CKO_DATA objects are stored in TROPIC01's R-MEM (512 slots, 1-444 bytes each)
+         * ===================================================================== */
+        .C_CreateObject = C_CreateObject,       /* Create data object in R-MEM */
+        .C_CopyObject = NULL,                   /* Copy an object (not implemented) */
+        .C_DestroyObject = C_DestroyObject,     /* Erase data from R-MEM */
+        .C_GetObjectSize = NULL,                /* Get object size (not implemented) */
+        .C_GetAttributeValue = C_GetAttributeValue, /* Read data from R-MEM */
+        .C_SetAttributeValue = NULL,            /* Set object attributes (not implemented) */
+        .C_FindObjectsInit = C_FindObjectsInit, /* Start R-MEM enumeration */
+        .C_FindObjects = C_FindObjects,         /* Find non-empty R-MEM slots */
+        .C_FindObjectsFinal = C_FindObjectsFinal, /* End R-MEM enumeration */
          
          /* =====================================================================
           * ENCRYPTION FUNCTIONS

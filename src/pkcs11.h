@@ -270,6 +270,8 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKR_SLOT_ID_INVALID                     0x00000003  /**< Invalid slot ID */
 #define CKR_GENERAL_ERROR                       0x00000005  /**< Unspecified error */
 #define CKR_ARGUMENTS_BAD                       0x00000007  /**< Invalid argument(s) */
+#define CKR_ATTRIBUTE_TYPE_INVALID              0x00000012  /**< Invalid attribute type */
+#define CKR_ATTRIBUTE_VALUE_INVALID             0x00000013  /**< Invalid attribute value */
 #define CKR_DEVICE_ERROR                        0x00000030  /**< Hardware/device error */
 #define CKR_DEVICE_MEMORY                       0x00000031  /**< Token memory error */
 #define CKR_DEVICE_REMOVED                      0x00000032  /**< Token was removed */
@@ -277,10 +279,14 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKR_KEY_HANDLE_INVALID                  0x00000060  /**< Invalid key handle */
 #define CKR_KEY_TYPE_INCONSISTENT               0x00000063  /**< Key type doesn't match */
 #define CKR_MECHANISM_INVALID                   0x00000070  /**< Invalid mechanism */
+#define CKR_OBJECT_HANDLE_INVALID               0x00000082  /**< Invalid object handle */
+#define CKR_OPERATION_ACTIVE                    0x00000090  /**< Operation already active */
+#define CKR_OPERATION_NOT_INITIALIZED           0x00000091  /**< Operation not initialized */
 #define CKR_SESSION_COUNT                       0x000000B1  /**< Too many sessions */
 #define CKR_SESSION_HANDLE_INVALID              0x000000B3  /**< Invalid session handle */
 #define CKR_SESSION_PARALLEL_NOT_SUPPORTED      0x000000B4  /**< Parallel sessions not supported */
 #define CKR_SIGNATURE_INVALID                   0x000000C0  /**< Signature verification failed */
+#define CKR_TEMPLATE_INCOMPLETE                 0x000000D0  /**< Required attribute missing */
 #define CKR_TOKEN_NOT_PRESENT                   0x000000E0  /**< Token not in slot */
 #define CKR_USER_NOT_LOGGED_IN                  0x00000101  /**< Must login first */
 #define CKR_BUFFER_TOO_SMALL                    0x00000150  /**< Output buffer too small */
@@ -314,7 +320,9 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKA_TOKEN                               0x00000001  /**< True if stored on token */
 #define CKA_PRIVATE                             0x00000002  /**< True if login required */
 #define CKA_LABEL                               0x00000003  /**< Human-readable name */
+#define CKA_VALUE                               0x00000011  /**< Object value (data content) */
 #define CKA_KEY_TYPE                            0x00000100  /**< Key type (CKK_*) */
+#define CKA_ID                                  0x00000102  /**< Object identifier */
 #define CKA_SIGN                                0x00000108  /**< True if key can sign */
 #define CKA_VERIFY                              0x0000010A  /**< True if key can verify */
 #define CKA_EC_PARAMS                           0x00000180  /**< EC curve parameters (DER) */
