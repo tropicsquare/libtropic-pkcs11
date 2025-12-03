@@ -163,11 +163,17 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
  }
  
  
- CK_RV C_Finalize(CK_VOID_PTR pReserved) {
-     LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
-     
-     /* Can't finalize if not initialized */
-     if (!pkcs11_ctx.initialized) {
+CK_RV C_Finalize(CK_VOID_PTR pReserved) {
+    LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
+    
+    /* pReserved must be NULL_PTR per PKCS#11 spec */
+    if (pReserved != NULL) {
+        LT_PKCS11_LOG(">>> pReserved is not NULL - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Can't finalize if not initialized */
+    if (!pkcs11_ctx.initialized) {
          LT_PKCS11_LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
@@ -215,9 +221,15 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
      return CKR_OK;
  }
  
- CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
-     LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
-     
+CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
+    LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
     /* Validate parameter */
     if (!pInfo) {
         LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
@@ -247,12 +259,20 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
      return CKR_OK;
  }
  
- CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount) {
-     LT_PKCS11_LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
-         tokenPresent, pSlotList, pulCount);
-     
-     /* pulCount is required */
-     if (!pulCount) {
+CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount) {
+    LT_PKCS11_LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
+        tokenPresent, pSlotList, pulCount);
+    
+    (void)tokenPresent;  /* We always report our single slot */
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* pulCount is required */
+    if (!pulCount) {
          LT_PKCS11_LOG(">>> pulCount is NULL - returning CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
@@ -277,20 +297,26 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
      return CKR_OK;
  }
  
- CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
-     LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
-     
-     /* We only support slot ID 1 */
-     if (slotID != 1) { 
-         LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
-         return CKR_SLOT_ID_INVALID;
-     }
-     
-     /* pInfo is required */
-     if (!pInfo) {
-         LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
+CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
+    LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* We only support slot ID 1 */
+    if (slotID != 1) { 
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        return CKR_SLOT_ID_INVALID;
+    }
+    
+    /* pInfo is required */
+    if (!pInfo) {
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
      
      /* Fill in slot information */
      memset(pInfo, 0, sizeof(CK_SLOT_INFO));
