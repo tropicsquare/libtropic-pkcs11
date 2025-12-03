@@ -1,403 +1,215 @@
 /**
  * @file pkcs11.c
- * @brief PKCS#11 Module for TROPIC01 Secure Element
+ * @brief PKCS#11 Cryptoki module for TROPIC01 Secure Element
  * @copyright Copyright (c) 2020-2025 Tropic Square s.r.o.
- *
- * @license For the license see file LICENSE.md file in the root directory of this source tree.
- **/
+ * @license See LICENSE.md in the root directory
+ */
 
- #include "pkcs11.h"           /* PKCS#11 type definitions (CK_RV, CK_INFO, etc.) */
- #include <stdio.h>            /* printf(), fflush() for debug output */
- #include <string.h>           /* strncpy(), memset() for string/memory operations */
- #include <stdlib.h>           /* exit() */
- #include <time.h>             /* time() for RNG seed */
- #include <inttypes.h>         /* PRIu64 and similar format specifiers */
- 
- /* libtropic headers - these provide the API to communicate with TROPIC01 */
- #include "libtropic.h"                      /* Main libtropic API: lt_init(), lt_random_value_get(), etc. */
- #include "libtropic_common.h"               /* Common types: lt_ret_t, lt_handle_t, etc. */
- #include "libtropic_examples.h"             /* Example utilities and key declarations */
- #include "libtropic_logging.h"              /* Logging macros from libtropic */
- #include "string.h"                         /* Additional string functions */
- #include "libtropic_port.h"                 /* Hardware Abstraction Layer (HAL) interface */
- #include "libtropic_port_unix_usb_dongle.h" /* Unix USB dongle HAL implementation */
- 
- /* ==================================================================================
-  * PAIRING KEYS - External declaration
-  * ==================================================================================
-  * 
-  * These keys are defined in libtropic/keys/keys.c and linked into our library.
-  * They are used for establishing a secure session with TROPIC01.
-  * 
-  * sh0priv: Our private key (X25519, 32 bytes)
-  * sh0pub:  The chip's public key (X25519, 32 bytes)
-  * 
-  * These are factory-provisioned keys. Different chip batches have different keys.
-  * The keys enable mutual authentication and encrypted communication.
-  */
- extern uint8_t sh0priv[];
- extern uint8_t sh0pub[];
- 
-/* ==================================================================================
- * OBJECT HANDLE SCHEME
- * ==================================================================================
- * 
- * Object handles encode the object type and slot index:
- *   Handle = (TYPE << 16) | SLOT_INDEX
- * 
- * Types:
- *   0x0001 = R-MEM Data Object (CKO_DATA)
- * 
- * R-MEM has 512 slots (0-511), each can store 1-444 bytes.
+#include "pkcs11.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <inttypes.h>
+
+#include "libtropic.h"
+#include "libtropic_common.h"
+#include "libtropic_examples.h"
+#include "libtropic_logging.h"
+#include "libtropic_port.h"
+#include "libtropic_port_unix_usb_dongle.h"
+
+/* Pairing keys for secure session (defined in libtropic/keys/keys.c) */
+extern uint8_t sh0priv[];
+extern uint8_t sh0pub[];
+
+/*
+ * Object handle encoding: (TYPE << 16) | SLOT_INDEX
+ * R-MEM: 512 slots (0-511), 1-444 bytes each
+ * ECC: 32 slots (0-31), P256 or Ed25519
  */
 #define PKCS11_HANDLE_TYPE_RMEM_DATA    0x0001
+#define PKCS11_HANDLE_TYPE_ECC_PRIVKEY  0x0002
+#define PKCS11_HANDLE_TYPE_ECC_PUBKEY   0x0003
 
-#define PKCS11_MAKE_HANDLE(type, slot)  (((CK_OBJECT_HANDLE)(type) << 16) | (slot))
-#define PKCS11_HANDLE_GET_TYPE(h)       (((h) >> 16) & 0xFFFF)
-#define PKCS11_HANDLE_GET_SLOT(h)       ((h) & 0xFFFF)
-#define PKCS11_IS_VALID_RMEM_HANDLE(h)  (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_RMEM_DATA && \
-                                         PKCS11_HANDLE_GET_SLOT(h) <= TR01_R_MEM_DATA_SLOT_MAX)
+#define PKCS11_MAKE_HANDLE(type, slot)     (((CK_OBJECT_HANDLE)(type) << 16) | (slot))
+#define PKCS11_HANDLE_GET_TYPE(h)          (((h) >> 16) & 0xFFFF)
+#define PKCS11_HANDLE_GET_SLOT(h)          ((h) & 0xFFFF)
 
-/* ==================================================================================
- * GLOBAL STATE - Context Structure
- * ==================================================================================
- * 
- * PKCS#11 requires tracking library and session state across function calls.
- * All global state is wrapped in a single context structure for better organization.
- * 
- * initialized: Whether C_Initialize() has been called
- * session_open: Whether a secure session is active (C_OpenSession called)
- * lt_handle: The libtropic handle - persists between function calls
- * lt_device: USB device configuration - persists between function calls
- * session_handle: The current session handle returned by C_OpenSession
- * 
- * Find operation state:
- * find_active: Whether a C_FindObjectsInit is in progress
- * find_class: Object class being searched for
- * find_slot_index: Current R-MEM slot being enumerated
- */
+#define PKCS11_IS_VALID_RMEM_HANDLE(h) \
+    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_RMEM_DATA && \
+     PKCS11_HANDLE_GET_SLOT(h) <= TR01_R_MEM_DATA_SLOT_MAX)
+
+#define PKCS11_IS_VALID_ECC_PRIV_HANDLE(h) \
+    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_ECC_PRIVKEY && \
+     PKCS11_HANDLE_GET_SLOT(h) <= TR01_ECC_SLOT_31)
+
+#define PKCS11_IS_VALID_ECC_PUB_HANDLE(h) \
+    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_ECC_PUBKEY && \
+     PKCS11_HANDLE_GET_SLOT(h) <= TR01_ECC_SLOT_31)
+
+/* Module context - all global state in one place */
 typedef struct {
-    CK_BBOOL initialized;                   /* Whether library is initialized */
-    CK_BBOOL session_open;                  /* Whether a session is open */
-    lt_handle_t lt_handle;                  /* libtropic handle */
-    lt_dev_unix_usb_dongle_t lt_device;     /* USB device configuration */
-    CK_SESSION_HANDLE session_handle;       /* Current session handle */
-    
-    /* Find operation state */
-    CK_BBOOL find_active;                   /* C_FindObjectsInit in progress */
-    CK_OBJECT_CLASS find_class;             /* Class being searched (CKO_DATA, etc.) */
-    uint16_t find_slot_index;               /* Current R-MEM slot for enumeration */
+    CK_BBOOL initialized;
+    CK_BBOOL session_open;
+    lt_handle_t lt_handle;
+    lt_dev_unix_usb_dongle_t lt_device;
+    CK_SESSION_HANDLE session_handle;
+
+    /* C_FindObjects state */
+    CK_BBOOL find_active;
+    CK_OBJECT_CLASS find_class;
+    uint16_t find_rmem_index;
+    uint8_t find_ecc_index;
+    CK_BBOOL find_ecc_done;
+    char find_label[64];
+    CK_ULONG find_label_len;
+
+    /* C_Sign state */
+    CK_BBOOL sign_active;
+    CK_MECHANISM_TYPE sign_mechanism;
+    uint8_t sign_key_slot;
+    lt_ecc_curve_type_t sign_key_curve;
 } lt_pkcs11_ctx_t;
 
-/* Single global context instance */
-static lt_pkcs11_ctx_t pkcs11_ctx = {
-    .initialized = CK_FALSE,
-    .session_open = CK_FALSE,
-    .lt_handle = {0},
-    .lt_device = {0},
-    .session_handle = 0,
-    .find_active = CK_FALSE,
-    .find_class = 0,
-    .find_slot_index = 0
-};
+static lt_pkcs11_ctx_t pkcs11_ctx = {0};
+
+/* ---------------------------------------------------------------------------
+ * Core PKCS#11 Functions
+ * --------------------------------------------------------------------------- */
  
  
- 
- /* ==================================================================================
-  * PKCS#11 REQUIRED FUNCTIONS
-  * ==================================================================================
-  * 
-  * Every PKCS#11 module must implement certain core functions. These are:
-  * - C_Initialize: Called once when application starts using the module
-  * - C_Finalize: Called once when application is done with the module
-  * - C_GetInfo: Returns information about the PKCS#11 library itself
-  * - C_GetFunctionList: Returns pointers to all functions (most important!)
-  * - C_GetSlotList: Lists available "slots" (physical readers/ports)
-  * - C_GetSlotInfo: Information about a specific slot
-  * - C_GetTokenInfo: Information about the token (chip) in a slot
-  * - C_OpenSession: Opens a session with a token
-  * - C_CloseSession: Closes a session
-  * 
-  * All PKCS#11 functions return CK_RV (return value), which is an error code.
-  * CKR_OK (0) means success, other values indicate specific errors.
-  */
- 
- 
- CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
-     LT_PKCS11_LOG(">>> C_Initialize (pInitArgs=%p)", pInitArgs);
-     
-     /* Check if already initialized - PKCS#11 forbids double initialization */
-     if (pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Already initialized - returning CKR_CRYPTOKI_ALREADY_INITIALIZED");
-         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
-     }
-     
-    /* =========================================================================
-     * STEP 1: CONFIGURE USB DEVICE
-     * =========================================================================
-     * 
-     * Set up the USB dongle configuration that will be used for all
-     * communication with TROPIC01.
-     * 
-     * dev_path: The Linux device file for the USB serial port.
-     *           Configured via CMake option TS_USB_DEV
-     *           (default: /dev/ttyACM0).
-     * 
-     * baud_rate: Serial communication speed (115200 baud for TROPIC01)
-     * 
-     * rng_seed: Seed for software RNG (used as fallback, not for our HWRNG)
-     */
-     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
-     strncpy(pkcs11_ctx.lt_device.dev_path, TS_USB_DEV, sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
-     pkcs11_ctx.lt_device.baud_rate = 115200;
-     pkcs11_ctx.lt_device.rng_seed = (unsigned int)time(NULL);
-     
-     LT_PKCS11_LOG(">>> USB device configured: %s @ %d baud", pkcs11_ctx.lt_device.dev_path, pkcs11_ctx.lt_device.baud_rate);
-     
-     /* =========================================================================
-      * STEP 2: INITIALIZE LIBTROPIC HANDLE
-      * =========================================================================
-      * 
-      * Attach device config to the handle's L2 (Layer 2) structure.
-      * 
-      * libtropic uses a layered architecture:
-      * - L1: Physical layer (SPI, UART)
-      * - L2: Frame layer (packet framing, CRC)
-      * - L3: Application layer (commands, responses)
-      */
-     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
-     pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
-     
-     /* =========================================================================
-      * STEP 3: INITIALIZE COMMUNICATION WITH TROPIC01
-      * =========================================================================
-      * 
-      * lt_init() performs:
-      * - Opens the serial port
-      * - Sends initial handshake to verify chip is responding
-      * - Sets up communication buffers
-      */
-     LT_PKCS11_LOG(">>> Initializing libtropic handle...");
-     lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
-     if (ret != LT_OK) {
-         LT_PKCS11_LOG(">>> Failed to initialize libtropic: %s", lt_ret_verbose(ret));
-         return CKR_DEVICE_ERROR;
-     }
-     
-     LT_PKCS11_LOG(">>> TROPIC01 communication initialized successfully");
-     
-     /* Mark as initialized */
-     pkcs11_ctx.initialized = CK_TRUE;
-     pkcs11_ctx.session_open = CK_FALSE;
-     pkcs11_ctx.session_handle = 0;
-     
-     LT_PKCS11_LOG(">>> C_Initialize OK");
-     return CKR_OK;
- }
+CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
+    LT_PKCS11_LOG("C_Initialize");
+
+    if (pkcs11_ctx.initialized)
+        return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+
+    /* Configure USB device (path from CMake TS_USB_DEV option) */
+    memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
+    strncpy(pkcs11_ctx.lt_device.dev_path, TS_USB_DEV,
+            sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
+    pkcs11_ctx.lt_device.baud_rate = 115200;
+
+    /* Initialize libtropic handle */
+    memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
+    pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
+
+    lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("lt_init failed: %s", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+
+    pkcs11_ctx.initialized = CK_TRUE;
+    return CKR_OK;
+}
  
  
 CK_RV C_Finalize(CK_VOID_PTR pReserved) {
-    LT_PKCS11_LOG(">>> C_Finalize (pReserved=%p)", pReserved);
-    
-    /* pReserved must be NULL_PTR per PKCS#11 spec */
-    if (pReserved != NULL) {
-        LT_PKCS11_LOG(">>> pReserved is not NULL - returning CKR_ARGUMENTS_BAD");
+    LT_PKCS11_LOG("C_Finalize");
+
+    if (pReserved != NULL)
         return CKR_ARGUMENTS_BAD;
-    }
-    
-    /* Can't finalize if not initialized */
-    if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
-         return CKR_CRYPTOKI_NOT_INITIALIZED;
-     }
-     
-     /* =========================================================================
-      * STEP 1: CLOSE SECURE SESSION IF OPEN
-      * =========================================================================
-      * 
-      * If a secure session is still active, abort it first.
-      * This ensures clean shutdown even if C_CloseSession wasn't called.
-      */
-     if (pkcs11_ctx.session_open) {
-         LT_PKCS11_LOG(">>> Aborting open secure session...");
-         lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
-         if (ret != LT_OK) {
-             LT_PKCS11_LOG(">>> Warning: Failed to abort session: %s", lt_ret_verbose(ret));
-             /* Continue with finalization anyway */
-         }
-         pkcs11_ctx.session_open = CK_FALSE;
-         pkcs11_ctx.session_handle = 0;
-     }
-     
-     /* =========================================================================
-      * STEP 2: DEINITIALIZE LIBTROPIC
-      * =========================================================================
-      * 
-      * lt_deinit() performs:
-      * - Closes the serial port
-      * - Frees allocated buffers
-      * - Resets handle state
-      */
-     LT_PKCS11_LOG(">>> Deinitializing libtropic...");
-     lt_ret_t ret = lt_deinit(&pkcs11_ctx.lt_handle);
-     if (ret != LT_OK) {
-         LT_PKCS11_LOG(">>> Warning: Failed to deinitialize libtropic: %s", lt_ret_verbose(ret));
-         /* Continue with finalization anyway */
-     }
-     
-     /* Clear global state */
-     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
-     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
-     pkcs11_ctx.initialized = CK_FALSE;
-     
-     LT_PKCS11_LOG(">>> C_Finalize OK");
-     return CKR_OK;
- }
- 
-CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
-    LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
-    
-    /* Library must be initialized */
-    if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+
+    if (!pkcs11_ctx.initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    
-    /* Validate parameter */
-    if (!pInfo) {
-        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
-        return CKR_ARGUMENTS_BAD;
+
+    /* Close secure session if still open */
+    if (pkcs11_ctx.session_open) {
+        lt_session_abort(&pkcs11_ctx.lt_handle);
+        pkcs11_ctx.session_open = CK_FALSE;
     }
 
-    /* =========================================================================
-      * FILL IN PKCS#11 LIBRARY INFO
-      * =========================================================================
-      * 
-      * This is the actual PKCS#11 requirement - return info about the library.
-      */
-     
-     /* Clear the structure first (PKCS#11 strings are space-padded, not null-terminated) */
-     memset(pInfo, 0, sizeof(CK_INFO));
-     
-     /* Cryptoki version we implement: 2.40 */
-     pInfo->cryptokiVersion.major = 2;
-     pInfo->cryptokiVersion.minor = 40;
-     
-     /* Manufacturer and library description (max 32 chars each) */
-     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
-     strncpy((char*)pInfo->libraryDescription, "Tropic PKCS11", 32);
-     
-     LT_PKCS11_LOG(">>> C_GetInfo OK (version=%d.%d, manufacturer=TropicSquare)", 
-         pInfo->cryptokiVersion.major, pInfo->cryptokiVersion.minor);
-     return CKR_OK;
- }
- 
-CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount) {
-    LT_PKCS11_LOG(">>> C_GetSlotList (tokenPresent=%d, pSlotList=%p, pulCount=%p)", 
-        tokenPresent, pSlotList, pulCount);
-    
-    (void)tokenPresent;  /* We always report our single slot */
-    
-    /* Library must be initialized */
-    if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+    lt_deinit(&pkcs11_ctx.lt_handle);
+    memset(&pkcs11_ctx, 0, sizeof(pkcs11_ctx));
+
+    return CKR_OK;
+}
+
+CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
+    LT_PKCS11_LOG("C_GetInfo");
+
+    if (!pkcs11_ctx.initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    
-    /* pulCount is required */
-    if (!pulCount) {
-         LT_PKCS11_LOG(">>> pulCount is NULL - returning CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     if (!pSlotList) {
-         /* Query mode: application wants to know how many slots exist */
-         *pulCount = 1;  /* We have exactly one slot */
-         LT_PKCS11_LOG(">>> Query mode: returning count=1");
-     } else {
-         /* Fill mode: application wants the actual slot IDs */
-         if (*pulCount < 1) {
-             /* Array too small to hold our slot */
-             LT_PKCS11_LOG(">>> Buffer too small (pulCount=%lu) - returning CKR_BUFFER_TOO_SMALL", *pulCount);
-             return CKR_BUFFER_TOO_SMALL;
-         }
-         pSlotList[0] = 1;   /* Our slot has ID 1 */
-         *pulCount = 1;      /* We returned 1 slot */
-         LT_PKCS11_LOG(">>> Filled slot list: slotID=1");
-     }
-     
-     LT_PKCS11_LOG(">>> C_GetSlotList OK (count=%lu)", *pulCount);
-     return CKR_OK;
- }
- 
-CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
-    LT_PKCS11_LOG(">>> C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
-    
-    /* Library must be initialized */
-    if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
-    
-    /* We only support slot ID 1 */
-    if (slotID != 1) { 
-        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
-        return CKR_SLOT_ID_INVALID;
-    }
-    
-    /* pInfo is required */
-    if (!pInfo) {
-        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+
+    if (!pInfo)
         return CKR_ARGUMENTS_BAD;
-    }
-     
-     /* Fill in slot information */
-     memset(pInfo, 0, sizeof(CK_SLOT_INFO));
-     strncpy((char*)pInfo->slotDescription, "TROPIC01 Secure Element USB Slot", 64);
-     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
-     pInfo->flags = CKF_TOKEN_PRESENT | CKF_HW_SLOT;
-     
-     /* Read firmware version from chip if initialized */
-     if (pkcs11_ctx.initialized) {
-         uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-         if (ret == LT_OK) {
-             /* firmwareVersion: RISC-V FW (major.minor) */
-             pInfo->firmwareVersion.major = fw_ver[3];
-             pInfo->firmwareVersion.minor = fw_ver[2];
-         }
-         /* hardwareVersion: Use SPECT FW as hardware indicator */
-         ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-         if (ret == LT_OK) {
-             pInfo->hardwareVersion.major = fw_ver[3];
-             pInfo->hardwareVersion.minor = fw_ver[2];
-         }
-     }
-     
-     LT_PKCS11_LOG(">>> C_GetSlotInfo OK (description='TROPIC01 Secure Element USB Slot', HW=%d.%d, FW=%d.%d)",
-         pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
-         pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
-     return CKR_OK;
- }
- 
-CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
-    LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
-    
-    /* Library must be initialized */
-    if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+
+    memset(pInfo, 0, sizeof(CK_INFO));
+    pInfo->cryptokiVersion.major = 2;
+    pInfo->cryptokiVersion.minor = 40;
+    strncpy((char *)pInfo->manufacturerID, "TropicSquare", 32);
+    strncpy((char *)pInfo->libraryDescription, "Tropic PKCS11", 32);
+
+    return CKR_OK;
+}
+
+CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
+                    CK_ULONG_PTR pulCount) {
+    LT_PKCS11_LOG("C_GetSlotList");
+    (void)tokenPresent;
+
+    if (!pkcs11_ctx.initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-    }
     
-    /* We only support slot ID 1 */
-    if (slotID != 1) { 
-        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
-        return CKR_SLOT_ID_INVALID;
+    if (!pulCount)
+        return CKR_ARGUMENTS_BAD;
+
+    if (!pSlotList) {
+        *pulCount = 1;
+    } else {
+        if (*pulCount < 1)
+            return CKR_BUFFER_TOO_SMALL;
+        pSlotList[0] = 0;
+        *pulCount = 1;
     }
+
+    return CKR_OK;
+}
+
+CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
+    LT_PKCS11_LOG("C_GetSlotInfo slot=%lu", slotID);
+
+    if (!pkcs11_ctx.initialized)
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+    if (slotID != 0)
+        return CKR_SLOT_ID_INVALID;
+
+    if (!pInfo)
+        return CKR_ARGUMENTS_BAD;
+
+    memset(pInfo, 0, sizeof(CK_SLOT_INFO));
+    strncpy((char *)pInfo->slotDescription, "TROPIC01 Secure Element USB Slot", 64);
+    strncpy((char *)pInfo->manufacturerID, "TropicSquare", 32);
+    pInfo->flags = CKF_TOKEN_PRESENT | CKF_HW_SLOT;
+
+    /* Read firmware versions from chip */
+    uint8_t fw_ver[4] = {0};
+    if (lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver) == LT_OK) {
+        pInfo->firmwareVersion.major = fw_ver[3];
+        pInfo->firmwareVersion.minor = fw_ver[2];
+    }
+    if (lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver) == LT_OK) {
+        pInfo->hardwareVersion.major = fw_ver[3];
+        pInfo->hardwareVersion.minor = fw_ver[2];
+    }
+
+    return CKR_OK;
+}
+
+CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
+    LT_PKCS11_LOG("C_GetTokenInfo slot=%lu", slotID);
+
+    if (!pkcs11_ctx.initialized)
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+    if (slotID != 0)
+        return CKR_SLOT_ID_INVALID;
     
     /* pInfo is required */
     if (!pInfo) {
-        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG("pInfo is NULL: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -405,7 +217,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     struct lt_chip_id_t chip_id = {0};
     lt_ret_t ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG(">>> Failed to read chip ID: %s - returning CKR_TOKEN_NOT_PRESENT", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("Failed to read chip ID: %s: CKR_TOKEN_NOT_PRESENT", lt_ret_verbose(ret));
         return CKR_TOKEN_NOT_PRESENT;
     }
     
@@ -415,8 +227,8 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
     /* Manufacturer is always TropicSquare */
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
     
-    /* Token capabilities */
-    pInfo->flags = CKF_RNG;  /* This token has a hardware RNG! */
+    /* Token capabilities - mark as fully initialized with RNG */
+    pInfo->flags = CKF_RNG | CKF_TOKEN_INITIALIZED | CKF_USER_PIN_INITIALIZED;
     
     /* Session limits */
     pInfo->ulMaxSessionCount = 1;      /* We support only one session at a time */
@@ -474,7 +286,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
         strncpy((char*)pInfo->label, "TROPIC01", 32);
     }
     
-    LT_PKCS11_LOG(">>> C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
+    LT_PKCS11_LOG("C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
         pInfo->label, pInfo->model, pInfo->serialNumber,
         pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
         pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
@@ -483,7 +295,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
  
 CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
-    LT_PKCS11_LOG(">>> C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
+    LT_PKCS11_LOG("C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
         slotID, flags, pApplication, Notify, phSession);
     
     (void)pApplication;  /* Unused - we don't support notifications */
@@ -491,110 +303,64 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     
     /* Library must be initialized first */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* We only support slot ID 1 */
-    if (slotID != 1) {
-        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+    if (slotID != 0) {
+        LT_PKCS11_LOG("Invalid slotID=%lu: CKR_SLOT_ID_INVALID", slotID);
         return CKR_SLOT_ID_INVALID;
     }
     
     /* phSession is required - we need somewhere to return the handle */
     if (!phSession) {
-        LT_PKCS11_LOG(">>> phSession is NULL - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG("phSession is NULL: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
     /* CKF_SERIAL_SESSION must be set for legacy reasons (PKCS#11 v2.40 spec) */
     if (!(flags & CKF_SERIAL_SESSION)) {
-        LT_PKCS11_LOG(">>> CKF_SERIAL_SESSION not set - returning CKR_SESSION_PARALLEL_NOT_SUPPORTED");
+        LT_PKCS11_LOG("CKF_SERIAL_SESSION not set: CKR_SESSION_PARALLEL_NOT_SUPPORTED");
         return CKR_SESSION_PARALLEL_NOT_SUPPORTED;
     }
     
     /* Check if session is already open - we only support one session at a time */
     if (pkcs11_ctx.session_open) {
-        LT_PKCS11_LOG(">>> Session already open - returning CKR_SESSION_COUNT");
+        LT_PKCS11_LOG("Session already open: CKR_SESSION_COUNT");
         return CKR_SESSION_COUNT;
     }
     
-    /* =========================================================================
-     * ESTABLISH SECURE SESSION WITH TROPIC01
-     * =========================================================================
-     * 
-     * TROPIC01 requires an authenticated, encrypted session to access sensitive
-     * operations like the hardware RNG. This is a security feature - it ensures
-     * only authorized hosts can use the chip's cryptographic capabilities.
-     * 
-     * lt_verify_chip_and_start_secure_session() performs:
-     * 1. X25519 key exchange (Diffie-Hellman) to establish shared secret
-     * 2. Derives session encryption keys using HKDF
-     * 3. Establishes AES-GCM encrypted channel
-     * 4. Verifies chip authenticity using stored keys
-     * 
-     * Parameters:
-     * - pkcs11_ctx.lt_handle: Our global handle
-     * - sh0priv: Our X25519 private key (32 bytes)
-     * - sh0pub: Chip's X25519 public key (32 bytes)
-     * - TR01_PAIRING_KEY_SLOT_INDEX_0: Which key slot to use (0-3)
-     * 
-     * Key slots have different access permissions - slot 0 typically has
-     * full access, while others may be restricted.
-     */
-    LT_PKCS11_LOG(">>> Starting Secure Session with key slot %d", (int)TR01_PAIRING_KEY_SLOT_INDEX_0);
-    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+    /* Establish authenticated encrypted session with TROPIC01 */
+    lt_ret_t ret = lt_verify_chip_and_start_secure_session(
+        &pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG(">>> Failed to start Secure Session: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("Secure session failed: %s", lt_ret_verbose(ret));
         return CKR_DEVICE_ERROR;
     }
-    
-    LT_PKCS11_LOG(">>> Secure session established successfully");
-    
-    /* Use pointer to lt_handle as session handle - allows functions to cast back */
+
     pkcs11_ctx.session_handle = (CK_SESSION_HANDLE)&pkcs11_ctx.lt_handle;
     pkcs11_ctx.session_open = CK_TRUE;
     *phSession = pkcs11_ctx.session_handle;
-    
-    LT_PKCS11_LOG(">>> C_OpenSession OK (session=0x%lx)", *phSession);
+
     return CKR_OK;
 }
- 
- CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
-     LT_PKCS11_LOG(">>> C_CloseSession (hSession=0x%lx)", hSession);
-     
-     /* Library must be initialized */
-     if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
-         return CKR_CRYPTOKI_NOT_INITIALIZED;
-     }
-     
-     /* Check if session is open */
-     if (!pkcs11_ctx.session_open) {
-         LT_PKCS11_LOG(">>> No session open - returning CKR_SESSION_HANDLE_INVALID");
-         return CKR_SESSION_HANDLE_INVALID;
-     }
-     
-     /* Verify session handle matches */
-     if (hSession != pkcs11_ctx.session_handle) {
-         LT_PKCS11_LOG(">>> Invalid session handle 0x%lx (expected 0x%lx) - returning CKR_SESSION_HANDLE_INVALID", 
-             hSession, pkcs11_ctx.session_handle);
-         return CKR_SESSION_HANDLE_INVALID;
-     }
-     
-     /* =========================================================================
-      * ABORT SECURE SESSION
-      * =========================================================================
-      * 
-      * lt_session_abort() performs:
-      * - Notifies the chip that we're done
-      * - Clears session keys from memory
-      * - Allows new sessions to be established
-      */
-     LT_PKCS11_LOG(">>> Aborting Secure Session...");
-     lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
+
+CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
+    LT_PKCS11_LOG("C_CloseSession");
+
+    if (!pkcs11_ctx.initialized)
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+    if (!pkcs11_ctx.session_open)
+        return CKR_SESSION_HANDLE_INVALID;
+
+    if (hSession != pkcs11_ctx.session_handle)
+        return CKR_SESSION_HANDLE_INVALID;
+
+    lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
      if (ret != LT_OK) {
-         LT_PKCS11_LOG(">>> Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
+         LT_PKCS11_LOG("Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
          /* Continue anyway - mark session as closed */
      }
      
@@ -602,14 +368,14 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
      pkcs11_ctx.session_open = CK_FALSE;
      pkcs11_ctx.session_handle = 0;
      
-    LT_PKCS11_LOG(">>> C_CloseSession OK");
+    LT_PKCS11_LOG("C_CloseSession OK");
     return CKR_OK;
 }
 
 
-/* ==================================================================================
+/* ---------------------------------------------------------------------------
  * OBJECT MANAGEMENT FUNCTIONS
- * ==================================================================================
+ * --------------------------------------------------------------------------
  * 
  * These functions implement storage and retrieval of data objects using TROPIC01's
  * R-MEM (Read/Write Memory). R-MEM provides 512 slots (0-511), each storing 1-444 bytes.
@@ -622,24 +388,24 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
 
 CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
                      CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject) {
-    LT_PKCS11_LOG(">>> C_CreateObject (hSession=0x%lx, pTemplate=%p, ulCount=%lu, phObject=%p)",
+    LT_PKCS11_LOG("C_CreateObject (hSession=0x%lx, pTemplate=%p, ulCount=%lu, phObject=%p)",
         hSession, pTemplate, ulCount, phObject);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Validate parameters */
     if (!pTemplate || ulCount == 0 || !phObject) {
-        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG("Invalid arguments: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -648,26 +414,60 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     CK_BYTE_PTR data_value = NULL;
     CK_ULONG data_len = 0;
     CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
+    char *label_value = NULL;
+    CK_ULONG label_len = 0;
+    
+    /* Debug: log all attributes in template */
+    LT_PKCS11_LOG("Template has %lu attributes:", ulCount);
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+        LT_PKCS11_LOG("  Attr[%lu]: type=0x%lx, len=%lu", i, pTemplate[i].type, pTemplate[i].ulValueLen);
+    }
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
         switch (pTemplate[i].type) {
             case CKA_CLASS:
                 if (pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
                     obj_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+                    LT_PKCS11_LOG("  CKA_CLASS = 0x%lx", obj_class);
                 }
                 break;
             case CKA_VALUE:
                 data_value = (CK_BYTE_PTR)pTemplate[i].pValue;
                 data_len = pTemplate[i].ulValueLen;
+                LT_PKCS11_LOG("  CKA_VALUE = %lu bytes", data_len);
                 break;
             case CKA_ID:
-                /* Use CKA_ID as the slot index */
-                if (pTemplate[i].ulValueLen >= sizeof(CK_ULONG)) {
-                    slot_id = *(CK_ULONG*)pTemplate[i].pValue;
-                } else if (pTemplate[i].ulValueLen == sizeof(uint16_t)) {
-                    slot_id = *(uint16_t*)pTemplate[i].pValue;
-                } else if (pTemplate[i].ulValueLen == sizeof(uint8_t)) {
-                    slot_id = *(uint8_t*)pTemplate[i].pValue;
+                /* Use CKA_ID as the slot index - parse as big-endian bytes */
+                if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+                    uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
+                    slot_id = 0;
+                    for (CK_ULONG j = 0; j < pTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
+                        slot_id = (slot_id << 8) | id_bytes[j];
+                    }
+                    LT_PKCS11_LOG("  CKA_ID = %lu (parsed from %lu bytes)", slot_id, pTemplate[i].ulValueLen);
+                }
+                break;
+            case CKA_LABEL:
+                /* Parse label - can be used to specify slot like "slot:5" */
+                label_value = (char*)pTemplate[i].pValue;
+                label_len = pTemplate[i].ulValueLen;
+                LT_PKCS11_LOG("  CKA_LABEL = '%.*s'", (int)label_len, label_value);
+                /* Try to parse slot number from label like "slot:5" or just a number */
+                if (label_value && label_len > 0) {
+                    if (label_len > 5 && strncmp(label_value, "slot:", 5) == 0) {
+                        slot_id = (CK_ULONG)atoi(label_value + 5);
+                        LT_PKCS11_LOG("  Parsed slot from label: %lu", slot_id);
+                    } else {
+                        /* Try parsing as plain number */
+                        char temp[16] = {0};
+                        CK_ULONG copy_len = (label_len < 15) ? label_len : 15;
+                        memcpy(temp, label_value, copy_len);
+                        int parsed = atoi(temp);
+                        if (parsed > 0 || (label_len == 1 && label_value[0] == '0')) {
+                            slot_id = (CK_ULONG)parsed;
+                            LT_PKCS11_LOG("  Parsed slot from numeric label: %lu", slot_id);
+                        }
+                    }
                 }
                 break;
             default:
@@ -676,21 +476,23 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         }
     }
     
+    LT_PKCS11_LOG("Parsed: obj_class=0x%lx, data_len=%lu, slot_id=%lu", obj_class, data_len, slot_id);
+    
     /* We only support CKO_DATA objects */
     if (obj_class != CKO_DATA) {
-        LT_PKCS11_LOG(">>> Unsupported object class 0x%lx - returning CKR_ATTRIBUTE_VALUE_INVALID", obj_class);
+        LT_PKCS11_LOG("Unsupported object class 0x%lx: CKR_ATTRIBUTE_VALUE_INVALID", obj_class);
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
     
     /* CKA_VALUE is required for data objects */
     if (!data_value || data_len == 0) {
-        LT_PKCS11_LOG(">>> CKA_VALUE missing or empty - returning CKR_TEMPLATE_INCOMPLETE");
+        LT_PKCS11_LOG("CKA_VALUE missing or empty: CKR_TEMPLATE_INCOMPLETE");
         return CKR_TEMPLATE_INCOMPLETE;
     }
     
     /* Validate data size */
     if (data_len < TR01_R_MEM_DATA_SIZE_MIN || data_len > TR01_R_MEM_DATA_SIZE_MAX) {
-        LT_PKCS11_LOG(">>> Data size %lu out of range [%d, %d] - returning CKR_ATTRIBUTE_VALUE_INVALID",
+        LT_PKCS11_LOG("Data size %lu out of range [%d, %d]: CKR_ATTRIBUTE_VALUE_INVALID",
             data_len, TR01_R_MEM_DATA_SIZE_MIN, TR01_R_MEM_DATA_SIZE_MAX);
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
@@ -706,310 +508,705 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
             if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
                 slot_id = i;
                 found = CK_TRUE;
-                LT_PKCS11_LOG(">>> Found empty slot %lu", slot_id);
+                LT_PKCS11_LOG("Found empty slot %lu", slot_id);
                 break;
             }
         }
         
         if (!found) {
-            LT_PKCS11_LOG(">>> No empty R-MEM slots available - returning CKR_DEVICE_MEMORY");
+            LT_PKCS11_LOG("No empty R-MEM slots available: CKR_DEVICE_MEMORY");
             return CKR_DEVICE_MEMORY;
         }
     }
     
     /* Validate slot ID */
     if (slot_id > TR01_R_MEM_DATA_SLOT_MAX) {
-        LT_PKCS11_LOG(">>> Slot ID %lu exceeds max %d - returning CKR_ATTRIBUTE_VALUE_INVALID",
+        LT_PKCS11_LOG("Slot ID %lu exceeds max %d: CKR_ATTRIBUTE_VALUE_INVALID",
             slot_id, TR01_R_MEM_DATA_SLOT_MAX);
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
     
     /* Write data to R-MEM */
-    LT_PKCS11_LOG(">>> Writing %lu bytes to R-MEM slot %lu", data_len, slot_id);
+    LT_PKCS11_LOG("Writing %lu bytes to R-MEM slot %lu", data_len, slot_id);
     lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value, (uint16_t)data_len);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG(">>> Failed to write R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("Failed to write R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
         return CKR_DEVICE_ERROR;
     }
     
     /* Return object handle */
     *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot_id);
     
-    LT_PKCS11_LOG(">>> C_CreateObject OK (handle=0x%lx, slot=%lu)", *phObject, slot_id);
+    LT_PKCS11_LOG("C_CreateObject OK (handle=0x%lx, slot=%lu)", *phObject, slot_id);
     return CKR_OK;
 }
 
 CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject) {
-    LT_PKCS11_LOG(">>> C_DestroyObject (hSession=0x%lx, hObject=0x%lx)", hSession, hObject);
+    LT_PKCS11_LOG("C_DestroyObject (hSession=0x%lx, hObject=0x%lx)", hSession, hObject);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Validate object handle */
     if (!PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
-        LT_PKCS11_LOG(">>> Invalid object handle - returning CKR_OBJECT_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid object handle: CKR_OBJECT_HANDLE_INVALID");
         return CKR_OBJECT_HANDLE_INVALID;
     }
     
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
     
     /* Erase R-MEM slot */
-    LT_PKCS11_LOG(">>> Erasing R-MEM slot %u", slot);
+    LT_PKCS11_LOG("Erasing R-MEM slot %u", slot);
     lt_ret_t ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG(">>> Failed to erase R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("Failed to erase R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
         return CKR_DEVICE_ERROR;
     }
     
-    LT_PKCS11_LOG(">>> C_DestroyObject OK");
+    LT_PKCS11_LOG("C_DestroyObject OK");
     return CKR_OK;
 }
 
 CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                           CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
-    LT_PKCS11_LOG(">>> C_GetAttributeValue (hSession=0x%lx, hObject=0x%lx, pTemplate=%p, ulCount=%lu)",
+    LT_PKCS11_LOG("C_GetAttributeValue (hSession=0x%lx, hObject=0x%lx, pTemplate=%p, ulCount=%lu)",
         hSession, hObject, pTemplate, ulCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Validate parameters */
     if (!pTemplate || ulCount == 0) {
-        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG("Invalid arguments: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
-    /* Validate object handle */
-    if (!PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
-        LT_PKCS11_LOG(">>> Invalid object handle - returning CKR_OBJECT_HANDLE_INVALID");
-        return CKR_OBJECT_HANDLE_INVALID;
-    }
-    
+    uint16_t handle_type = PKCS11_HANDLE_GET_TYPE(hObject);
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
-    
-    /* Read data from R-MEM */
-    uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
-    uint16_t data_size = 0;
-    lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf, sizeof(data_buf), &data_size);
-    if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
-        LT_PKCS11_LOG(">>> Slot %u is empty - returning CKR_OBJECT_HANDLE_INVALID", slot);
-        return CKR_OBJECT_HANDLE_INVALID;
-    }
-    if (ret != LT_OK) {
-        LT_PKCS11_LOG(">>> Failed to read R-MEM: %s - returning CKR_DEVICE_ERROR", lt_ret_verbose(ret));
-        return CKR_DEVICE_ERROR;
-    }
-    
     CK_RV rv = CKR_OK;
     
-    /* Fill in requested attributes */
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        switch (pTemplate[i].type) {
-            case CKA_CLASS: {
-                CK_OBJECT_CLASS obj_class = CKO_DATA;
-                if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
-                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
-                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
-                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
-                } else {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_BUFFER_TOO_SMALL;
+    /* Handle R-MEM Data Objects */
+    if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+        uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
+        uint16_t data_size = 0;
+        lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf, sizeof(data_buf), &data_size);
+        if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
+            LT_PKCS11_LOG("R-MEM slot %u is empty: CKR_OBJECT_HANDLE_INVALID", slot);
+            return CKR_OBJECT_HANDLE_INVALID;
+        }
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("Failed to read R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            return CKR_DEVICE_ERROR;
+        }
+        
+        /* Generate default label for this slot */
+        char label[32];
+        snprintf(label, sizeof(label), "R-MEM Slot %u", slot);
+        CK_ULONG label_len = strlen(label);
+        
+        const char *application = "TropicSquare";
+        CK_ULONG app_len = strlen(application);
+        
+        /* Fill in requested attributes for CKO_DATA */
+        for (CK_ULONG i = 0; i < ulCount; i++) {
+            switch (pTemplate[i].type) {
+                case CKA_CLASS: {
+                    CK_OBJECT_CLASS obj_class = CKO_DATA;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                        memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
                 }
-                break;
+                case CKA_LABEL:
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = label_len;
+                    } else if (pTemplate[i].ulValueLen >= label_len) {
+                        memcpy(pTemplate[i].pValue, label, label_len);
+                        pTemplate[i].ulValueLen = label_len;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                case CKA_APPLICATION:
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = app_len;
+                    } else if (pTemplate[i].ulValueLen >= app_len) {
+                        memcpy(pTemplate[i].pValue, application, app_len);
+                        pTemplate[i].ulValueLen = app_len;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                case CKA_VALUE:
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = data_size;
+                    } else if (pTemplate[i].ulValueLen >= data_size) {
+                        memcpy(pTemplate[i].pValue, data_buf, data_size);
+                        pTemplate[i].ulValueLen = data_size;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                case CKA_ID: {
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(uint16_t);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(uint16_t)) {
+                        memcpy(pTemplate[i].pValue, &slot, sizeof(uint16_t));
+                        pTemplate[i].ulValueLen = sizeof(uint16_t);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_TOKEN: {
+                    CK_BBOOL on_token = CK_TRUE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                default:
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                    break;
             }
-            case CKA_VALUE:
-                if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = data_size;
-                } else if (pTemplate[i].ulValueLen >= data_size) {
-                    memcpy(pTemplate[i].pValue, data_buf, data_size);
-                    pTemplate[i].ulValueLen = data_size;
-                } else {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_BUFFER_TOO_SMALL;
-                }
-                break;
-            case CKA_ID: {
-                /* Return slot ID */
-                if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = sizeof(uint16_t);
-                } else if (pTemplate[i].ulValueLen >= sizeof(uint16_t)) {
-                    memcpy(pTemplate[i].pValue, &slot, sizeof(uint16_t));
-                    pTemplate[i].ulValueLen = sizeof(uint16_t);
-                } else {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_BUFFER_TOO_SMALL;
-                }
-                break;
-            }
-            default:
-                /* Unknown attribute */
-                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                rv = CKR_ATTRIBUTE_TYPE_INVALID;
-                break;
         }
     }
+    /* Handle ECC Keys (Private and Public) */
+    else if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) || PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
+        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
+        lt_ecc_curve_type_t curve;
+        lt_ecc_key_origin_t origin;
+        
+        lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
+                                       pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
+        if (ret == LT_L3_ECC_INVALID_KEY) {
+            LT_PKCS11_LOG("ECC slot %u is empty: CKR_OBJECT_HANDLE_INVALID", slot);
+            return CKR_OBJECT_HANDLE_INVALID;
+        }
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("Failed to read ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            return CKR_DEVICE_ERROR;
+        }
+        
+        CK_BBOOL is_private = (handle_type == PKCS11_HANDLE_TYPE_ECC_PRIVKEY);
+        uint16_t pubkey_len = (curve == TR01_CURVE_P256) ? TR01_CURVE_P256_PUBKEY_LEN : TR01_CURVE_ED25519_PUBKEY_LEN;
+        
+        /* Generate label for this key */
+        char key_label[48];
+        const char *curve_name = (curve == TR01_CURVE_P256) ? "P256" : "Ed25519";
+        const char *key_type_name = is_private ? "Private" : "Public";
+        snprintf(key_label, sizeof(key_label), "ECC %s Key Slot %u (%s)", key_type_name, slot, curve_name);
+        CK_ULONG key_label_len = strlen(key_label);
+        
+        /* Fill in requested attributes for ECC key */
+        for (CK_ULONG i = 0; i < ulCount; i++) {
+            switch (pTemplate[i].type) {
+                case CKA_CLASS: {
+                    CK_OBJECT_CLASS obj_class = is_private ? CKO_PRIVATE_KEY : CKO_PUBLIC_KEY;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                        memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_LABEL:
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = key_label_len;
+                    } else if (pTemplate[i].ulValueLen >= key_label_len) {
+                        memcpy(pTemplate[i].pValue, key_label, key_label_len);
+                        pTemplate[i].ulValueLen = key_label_len;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                case CKA_KEY_TYPE: {
+                    CK_KEY_TYPE key_type = (curve == TR01_CURVE_P256) ? CKK_EC : CKK_EC_EDWARDS;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_KEY_TYPE)) {
+                        memcpy(pTemplate[i].pValue, &key_type, sizeof(CK_KEY_TYPE));
+                        pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_ID: {
+                    uint8_t id = (uint8_t)slot;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(uint8_t);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(uint8_t)) {
+                        memcpy(pTemplate[i].pValue, &id, sizeof(uint8_t));
+                        pTemplate[i].ulValueLen = sizeof(uint8_t);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_VALUE:
+                    /* For public keys, return the public key value */
+                    /* For private keys, this is sensitive - return error */
+                    if (is_private) {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_ATTRIBUTE_TYPE_INVALID;  /* Sensitive attribute */
+                    } else {
+                        if (pTemplate[i].pValue == NULL) {
+                            pTemplate[i].ulValueLen = pubkey_len;
+                        } else if (pTemplate[i].ulValueLen >= pubkey_len) {
+                            memcpy(pTemplate[i].pValue, pubkey_buf, pubkey_len);
+                            pTemplate[i].ulValueLen = pubkey_len;
+                        } else {
+                            pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                            rv = CKR_BUFFER_TOO_SMALL;
+                        }
+                    }
+                    break;
+                case CKA_EC_POINT: {
+                    /* Return DER-encoded OCTET STRING containing uncompressed EC point */
+                    /* Format: 04 <len> 04 <X> <Y> */
+                    /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
+                    /* For Ed25519: 04 21 04 <32 bytes> = 35 bytes total */
+                    if (is_private) {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                    } else {
+                        /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
+                        /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
+                        /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
+                        uint8_t ec_point[68];  /* Max size: 04 41 04 + 64 bytes */
+                        CK_ULONG ec_point_len;
+                        
+                        if (curve == TR01_CURVE_P256) {
+                            /* P-256: OCTET STRING { 04 || X || Y } */
+                            ec_point[0] = 0x04;  /* OCTET STRING tag */
+                            ec_point[1] = 65;    /* Length: 1 + 64 */
+                            ec_point[2] = 0x04;  /* Uncompressed point marker */
+                            memcpy(&ec_point[3], pubkey_buf, 64);
+                            ec_point_len = 67;
+                        } else {
+                            /* Ed25519: OCTET STRING { Y } */
+                            ec_point[0] = 0x04;  /* OCTET STRING tag */
+                            ec_point[1] = 32;    /* Length */
+                            memcpy(&ec_point[2], pubkey_buf, 32);
+                            ec_point_len = 34;
+                        }
+                        
+                        if (pTemplate[i].pValue == NULL) {
+                            pTemplate[i].ulValueLen = ec_point_len;
+                        } else if (pTemplate[i].ulValueLen >= ec_point_len) {
+                            memcpy(pTemplate[i].pValue, ec_point, ec_point_len);
+                            pTemplate[i].ulValueLen = ec_point_len;
+                        } else {
+                            pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                            rv = CKR_BUFFER_TOO_SMALL;
+                        }
+                    }
+                    break;
+                }
+                case CKA_SIGN: {
+                    /* Private keys can sign */
+                    CK_BBOOL can_sign = is_private ? CK_TRUE : CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &can_sign, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_VERIFY: {
+                    /* Public keys can verify */
+                    CK_BBOOL can_verify = is_private ? CK_FALSE : CK_TRUE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &can_verify, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                /* Attributes that are always FALSE for our keys */
+                case CKA_DECRYPT:
+                case CKA_ENCRYPT:
+                case CKA_WRAP:
+                case CKA_UNWRAP:
+                case CKA_DERIVE:
+                case CKA_SIGN_RECOVER:
+                case CKA_VERIFY_RECOVER: {
+                    CK_BBOOL attr_false = CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &attr_false, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                /* Private key specific attributes */
+                case CKA_SENSITIVE:
+                case CKA_ALWAYS_SENSITIVE:
+                case CKA_NEVER_EXTRACTABLE: {
+                    /* Private keys are always sensitive and never extractable */
+                    CK_BBOOL attr_val = is_private ? CK_TRUE : CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &attr_val, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_EXTRACTABLE: {
+                    /* Private keys are NEVER extractable from TROPIC01 */
+                    CK_BBOOL extractable = CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &extractable, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_LOCAL: {
+                    /* Keys generated on chip are local */
+                    CK_BBOOL is_local = (origin == TR01_CURVE_GENERATED) ? CK_TRUE : CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &is_local, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_ALWAYS_AUTHENTICATE: {
+                    /* We don't require per-operation authentication */
+                    CK_BBOOL always_auth = CK_FALSE;
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                        memcpy(pTemplate[i].pValue, &always_auth, sizeof(CK_BBOOL));
+                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                case CKA_EC_PARAMS: {
+                    /* Return DER-encoded curve OID */
+                    const CK_BYTE *ec_params;
+                    CK_ULONG ec_params_len;
+                    
+                    if (curve == TR01_CURVE_P256) {
+                        /* secp256r1 OID: 1.2.840.10045.3.1.7 */
+                        static const CK_BYTE p256_oid[] = {
+                            0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+                        };
+                        ec_params = p256_oid;
+                        ec_params_len = sizeof(p256_oid);
+                    } else {
+                        /* Ed25519 OID: 1.3.101.112 */
+                        static const CK_BYTE ed25519_oid[] = {
+                            0x06, 0x03, 0x2B, 0x65, 0x70
+                        };
+                        ec_params = ed25519_oid;
+                        ec_params_len = sizeof(ed25519_oid);
+                    }
+                    
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = ec_params_len;
+                    } else if (pTemplate[i].ulValueLen >= ec_params_len) {
+                        memcpy(pTemplate[i].pValue, ec_params, ec_params_len);
+                        pTemplate[i].ulValueLen = ec_params_len;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                    break;
+                }
+                default:
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                    break;
+            }
+        }
+    }
+    else {
+        LT_PKCS11_LOG("Invalid object handle: CKR_OBJECT_HANDLE_INVALID");
+        return CKR_OBJECT_HANDLE_INVALID;
+    }
     
-    LT_PKCS11_LOG(">>> C_GetAttributeValue returning 0x%lx", rv);
+    LT_PKCS11_LOG("C_GetAttributeValue returning 0x%lx", rv);
     return rv;
 }
 
 CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
-    LT_PKCS11_LOG(">>> C_FindObjectsInit (hSession=0x%lx, pTemplate=%p, ulCount=%lu)",
+    LT_PKCS11_LOG("C_FindObjectsInit (hSession=0x%lx, pTemplate=%p, ulCount=%lu)",
         hSession, pTemplate, ulCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Check if find operation already active */
     if (pkcs11_ctx.find_active) {
-        LT_PKCS11_LOG(">>> Find operation already active - returning CKR_OPERATION_ACTIVE");
+        LT_PKCS11_LOG("Find operation already active: CKR_OPERATION_ACTIVE");
         return CKR_OPERATION_ACTIVE;
     }
     
-    /* Parse template to find object class filter */
-    CK_OBJECT_CLASS find_class = CKO_DATA;  /* Default to CKO_DATA */
+    /* Parse template to find object class and label filter */
+    /* Default: find all objects (0 means no filter) */
+    CK_OBJECT_CLASS find_class = 0;
+    char *find_label = NULL;
+    CK_ULONG find_label_len = 0;
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
         if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+        } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+            find_label = (char*)pTemplate[i].pValue;
+            find_label_len = pTemplate[i].ulValueLen;
         }
-    }
-    
-    /* We only support CKO_DATA */
-    if (find_class != CKO_DATA) {
-        LT_PKCS11_LOG(">>> Only CKO_DATA supported, requested class 0x%lx", find_class);
-        /* Still allow the find but it will return no objects */
     }
     
     /* Initialize find state */
     pkcs11_ctx.find_active = CK_TRUE;
     pkcs11_ctx.find_class = find_class;
-    pkcs11_ctx.find_slot_index = 0;
+    pkcs11_ctx.find_rmem_index = 0;
+    pkcs11_ctx.find_ecc_index = 0;
+    pkcs11_ctx.find_ecc_done = CK_FALSE;
     
-    LT_PKCS11_LOG(">>> C_FindObjectsInit OK (searching for class 0x%lx)", find_class);
+    /* Store label filter */
+    if (find_label && find_label_len > 0) {
+        CK_ULONG copy_len = (find_label_len < sizeof(pkcs11_ctx.find_label) - 1) ? 
+                            find_label_len : sizeof(pkcs11_ctx.find_label) - 1;
+        memcpy(pkcs11_ctx.find_label, find_label, copy_len);
+        pkcs11_ctx.find_label[copy_len] = '\0';
+        pkcs11_ctx.find_label_len = copy_len;
+        LT_PKCS11_LOG("Label filter: '%s'", pkcs11_ctx.find_label);
+    } else {
+        pkcs11_ctx.find_label[0] = '\0';
+        pkcs11_ctx.find_label_len = 0;
+    }
+    
+    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, label='%s')", find_class, pkcs11_ctx.find_label);
     return CKR_OK;
 }
 
 CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
                     CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount) {
-    LT_PKCS11_LOG(">>> C_FindObjects (hSession=0x%lx, phObject=%p, ulMaxObjectCount=%lu, pulObjectCount=%p)",
+    LT_PKCS11_LOG("C_FindObjects (hSession=0x%lx, phObject=%p, ulMaxObjectCount=%lu, pulObjectCount=%p)",
         hSession, phObject, ulMaxObjectCount, pulObjectCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Check if find operation is active */
     if (!pkcs11_ctx.find_active) {
-        LT_PKCS11_LOG(">>> No find operation active - returning CKR_OPERATION_NOT_INITIALIZED");
+        LT_PKCS11_LOG("No find operation active: CKR_OPERATION_NOT_INITIALIZED");
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     
     /* Validate parameters */
     if (!phObject || !pulObjectCount) {
-        LT_PKCS11_LOG(">>> Invalid arguments - returning CKR_ARGUMENTS_BAD");
+        LT_PKCS11_LOG("Invalid arguments: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
     *pulObjectCount = 0;
+    CK_OBJECT_CLASS find_class = pkcs11_ctx.find_class;
     
-    /* Only search for CKO_DATA objects */
-    if (pkcs11_ctx.find_class != CKO_DATA) {
-        LT_PKCS11_LOG(">>> No objects found (unsupported class)");
-        return CKR_OK;
-    }
-    
-    /* Scan R-MEM slots for non-empty entries */
-    uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
-    uint16_t read_size;
-    
-    while (pkcs11_ctx.find_slot_index <= TR01_R_MEM_DATA_SLOT_MAX && *pulObjectCount < ulMaxObjectCount) {
-        uint16_t slot = pkcs11_ctx.find_slot_index++;
+    /* Search for CKO_DATA objects in R-MEM (if class filter matches or no filter) */
+    if (find_class == 0 || find_class == CKO_DATA) {
+        uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
+        uint16_t read_size;
         
-        lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf, sizeof(temp_buf), &read_size);
-        if (ret == LT_OK) {
-            /* Found a non-empty slot */
-            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
-            (*pulObjectCount)++;
-            LT_PKCS11_LOG(">>> Found object at slot %u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
+        while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX && *pulObjectCount < ulMaxObjectCount) {
+            uint16_t slot = pkcs11_ctx.find_rmem_index++;
+            
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf, sizeof(temp_buf), &read_size);
+            if (ret == LT_OK) {
+                /* Found a non-empty slot - check label filter if set */
+                CK_BBOOL label_match = CK_TRUE;
+                if (pkcs11_ctx.find_label_len > 0) {
+                    /* Generate the label for this slot */
+                    char slot_label[32];
+                    snprintf(slot_label, sizeof(slot_label), "R-MEM Slot %u", slot);
+                    /* Check if it matches the filter */
+                    if (strcmp(slot_label, pkcs11_ctx.find_label) != 0) {
+                        label_match = CK_FALSE;
+                    }
+                }
+                
+                if (label_match) {
+                    phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
+                    (*pulObjectCount)++;
+                    LT_PKCS11_LOG("Found DATA object at R-MEM slot %u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
+                }
+            }
+            /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
         }
-        /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
     }
     
-    LT_PKCS11_LOG(">>> C_FindObjects OK (found %lu objects)", *pulObjectCount);
+    /* Search for ECC keys (if class filter matches or no filter) */
+    if ((find_class == 0 || find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY) && 
+        !pkcs11_ctx.find_ecc_done) {
+        
+        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];  /* P256 is larger */
+        lt_ecc_curve_type_t curve;
+        lt_ecc_key_origin_t origin;
+        
+        while (pkcs11_ctx.find_ecc_index <= TR01_ECC_SLOT_31 && *pulObjectCount < ulMaxObjectCount) {
+            uint8_t slot = pkcs11_ctx.find_ecc_index++;
+            
+            lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot, 
+                                           pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
+            if (ret == LT_OK) {
+                /* Found a valid key - add private key handle (if searching for privkey or all) */
+                if (find_class == 0 || find_class == CKO_PRIVATE_KEY) {
+                    if (*pulObjectCount < ulMaxObjectCount) {
+                        phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot);
+                        (*pulObjectCount)++;
+                        LT_PKCS11_LOG("Found PRIVATE_KEY at ECC slot %u (handle=0x%lx, curve=%d)", 
+                            slot, phObject[*pulObjectCount - 1], curve);
+                    }
+                }
+                /* Add public key handle (if searching for pubkey or all) */
+                if (find_class == 0 || find_class == CKO_PUBLIC_KEY) {
+                    if (*pulObjectCount < ulMaxObjectCount) {
+                        phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot);
+                        (*pulObjectCount)++;
+                        LT_PKCS11_LOG("Found PUBLIC_KEY at ECC slot %u (handle=0x%lx, curve=%d)", 
+                            slot, phObject[*pulObjectCount - 1], curve);
+                    }
+                }
+            }
+            /* Skip empty/invalid slots (LT_L3_ECC_INVALID_KEY) */
+        }
+        
+        if (pkcs11_ctx.find_ecc_index > TR01_ECC_SLOT_31) {
+            pkcs11_ctx.find_ecc_done = CK_TRUE;
+        }
+    }
+    
+    LT_PKCS11_LOG("C_FindObjects OK (found %lu objects)", *pulObjectCount);
     return CKR_OK;
 }
 
 CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
-    LT_PKCS11_LOG(">>> C_FindObjectsFinal (hSession=0x%lx)", hSession);
+    LT_PKCS11_LOG("C_FindObjectsFinal (hSession=0x%lx)", hSession);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
-        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
     /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-        LT_PKCS11_LOG(">>> Invalid session - returning CKR_SESSION_HANDLE_INVALID");
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
     /* Check if find operation is active */
     if (!pkcs11_ctx.find_active) {
-        LT_PKCS11_LOG(">>> No find operation active - returning CKR_OPERATION_NOT_INITIALIZED");
+        LT_PKCS11_LOG("No find operation active: CKR_OPERATION_NOT_INITIALIZED");
         return CKR_OPERATION_NOT_INITIALIZED;
     }
     
     /* Clear find state */
     pkcs11_ctx.find_active = CK_FALSE;
     pkcs11_ctx.find_class = 0;
-    pkcs11_ctx.find_slot_index = 0;
+    pkcs11_ctx.find_rmem_index = 0;
+    pkcs11_ctx.find_ecc_index = 0;
+    pkcs11_ctx.find_ecc_done = CK_FALSE;
     
-    LT_PKCS11_LOG(">>> C_FindObjectsFinal OK");
+    LT_PKCS11_LOG("C_FindObjectsFinal OK");
     return CKR_OK;
 }
 
 
-/* ==================================================================================
+/* ---------------------------------------------------------------------------
  * RANDOM NUMBER GENERATION FUNCTIONS
- * ==================================================================================
+ * --------------------------------------------------------------------------
   * 
   * This is the main functionality of this PKCS#11 module!
   * 
@@ -1019,46 +1216,46 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
   */
  
  CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen) {
-     LT_PKCS11_LOG(">>> C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
+     LT_PKCS11_LOG("C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
          hSession, pRandomData, ulRandomLen);
      
-     /* =========================================================================
+     /* -----------------------------------------------------------------------
       * STEP 1: VALIDATE STATE AND PARAMETERS
-      * =========================================================================
+       -----------------------------------------------------------------------
       */
      
      /* Library must be initialized */
      if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+         LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
          return CKR_CRYPTOKI_NOT_INITIALIZED;
      }
      
      /* Session must be open (secure session established) */
      if (!pkcs11_ctx.session_open) {
-         LT_PKCS11_LOG(">>> No session open - returning CKR_SESSION_HANDLE_INVALID");
+         LT_PKCS11_LOG("No session open: CKR_SESSION_HANDLE_INVALID");
          return CKR_SESSION_HANDLE_INVALID;
      }
      
      /* Verify session handle */
      if (hSession != pkcs11_ctx.session_handle) {
-         LT_PKCS11_LOG(">>> Invalid session handle 0x%lx (expected 0x%lx) - returning CKR_SESSION_HANDLE_INVALID", 
+         LT_PKCS11_LOG("Invalid session handle 0x%lx (expected 0x%lx): CKR_SESSION_HANDLE_INVALID", 
              hSession, pkcs11_ctx.session_handle);
          return CKR_SESSION_HANDLE_INVALID;
      }
      
      /* Validate output buffer */
      if (!pRandomData) {
-         LT_PKCS11_LOG(">>> pRandomData is NULL - returning CKR_ARGUMENTS_BAD");
+         LT_PKCS11_LOG("pRandomData is NULL: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      if (ulRandomLen == 0) {
-         LT_PKCS11_LOG(">>> ulRandomLen is 0 - returning CKR_ARGUMENTS_BAD");
+         LT_PKCS11_LOG("ulRandomLen is 0: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      
-     /* =========================================================================
+     /* -----------------------------------------------------------------------
       * STEP 2: GET RANDOM BYTES FROM HARDWARE RNG
-      * =========================================================================
+       -----------------------------------------------------------------------
       * 
       * TROPIC01 can return maximum 255 bytes per request (TR01_RANDOM_VALUE_GET_LEN_MAX).
       * For larger requests, we need to make multiple calls and accumulate the data.
@@ -1082,7 +1279,7 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          /* Request random bytes from the chip */
          lt_ret_t ret = lt_random_value_get(&pkcs11_ctx.lt_handle, ptr, chunk_size);
          if (ret != LT_OK) {
-             LT_PKCS11_LOG(">>> Failed to get random bytes: %s", lt_ret_verbose(ret));
+             LT_PKCS11_LOG("Failed to get random bytes: %s", lt_ret_verbose(ret));
              return CKR_DEVICE_ERROR;
          }
          
@@ -1091,58 +1288,529 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          remaining -= chunk_size;
      }
      
-     /* =========================================================================
+     /* -----------------------------------------------------------------------
       * STEP 3: DEBUG OUTPUT - PRINT RANDOM BYTES IN HEX
-      * =========================================================================
+       -----------------------------------------------------------------------
       * 
       * Print the generated random bytes for verification.
       * Format: 0xAA, 0xBB, 0xCC, ...
       * 
       * NOTE: Remove this for production use - it pollutes stdout.
       */
-     LT_PKCS11_LOG(">>> Random bytes (%lu bytes):", ulRandomLen);
+     LT_PKCS11_LOG("Random bytes (%lu bytes):", ulRandomLen);
      for (CK_ULONG i = 0; i < ulRandomLen; i++) {
          LT_PKCS11_LOG("0x%02X", pRandomData[i]);
      }
      
-     LT_PKCS11_LOG(">>> C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
+     LT_PKCS11_LOG("C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
      return CKR_OK;
  }
  
  CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen) {
-     LT_PKCS11_LOG(">>> C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
+     LT_PKCS11_LOG("C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
          hSession, pSeed, ulSeedLen);
      
      /* Validate parameters */
      if (!pSeed) {
-         LT_PKCS11_LOG(">>> pSeed is NULL - returning CKR_ARGUMENTS_BAD");
+         LT_PKCS11_LOG("pSeed is NULL: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      if (ulSeedLen == 0) {
-         LT_PKCS11_LOG(">>> ulSeedLen is 0 - returning CKR_ARGUMENTS_BAD");
+         LT_PKCS11_LOG("ulSeedLen is 0: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      
      /* Accept the seed but do nothing - HWRNG doesn't need external seeding */
-     LT_PKCS11_LOG(">>> C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
+     LT_PKCS11_LOG("C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
      return CKR_FUNCTION_NOT_SUPPORTED;
- }
- 
- CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
+}
+
+
+/* ---------------------------------------------------------------------------
+ * SIGNING FUNCTIONS
+ * --------------------------------------------------------------------------
+ * 
+ * These functions implement ECDSA (P256) and EdDSA (Ed25519) signing using the
+ * ECC private keys stored in TROPIC01's secure key slots.
+ * 
+ * The private keys never leave the chip - signing is performed inside TROPIC01.
+ */
+
+CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey) {
+    LT_PKCS11_LOG("C_SignInit (hSession=0x%lx, pMechanism=%p, hKey=0x%lx)",
+        hSession, pMechanism, hKey);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate mechanism */
+    if (!pMechanism) {
+        LT_PKCS11_LOG("pMechanism is NULL: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Check if sign operation already active */
+    if (pkcs11_ctx.sign_active) {
+        LT_PKCS11_LOG("Sign operation already active: CKR_OPERATION_ACTIVE");
+        return CKR_OPERATION_ACTIVE;
+    }
+    
+    /* Validate key handle - must be ECC private key */
+    if (!PKCS11_IS_VALID_ECC_PRIV_HANDLE(hKey)) {
+        LT_PKCS11_LOG("Invalid key handle (not ECC private key): CKR_KEY_HANDLE_INVALID");
+        return CKR_KEY_HANDLE_INVALID;
+    }
+    
+    uint8_t slot = PKCS11_HANDLE_GET_SLOT(hKey);
+    
+    /* Read key to verify it exists and get curve type */
+    uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
+    lt_ecc_curve_type_t curve;
+    lt_ecc_key_origin_t origin;
+    
+    lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
+                                   pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
+    if (ret == LT_L3_ECC_INVALID_KEY) {
+        LT_PKCS11_LOG("ECC slot %u is empty: CKR_KEY_HANDLE_INVALID", slot);
+        return CKR_KEY_HANDLE_INVALID;
+    }
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("Failed to read ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    /* Validate mechanism matches key type */
+    if (pMechanism->mechanism == CKM_ECDSA) {
+        if (curve != TR01_CURVE_P256) {
+            LT_PKCS11_LOG("ECDSA requires P256 key, got Ed25519: CKR_KEY_TYPE_INCONSISTENT");
+            return CKR_KEY_TYPE_INCONSISTENT;
+        }
+    } else if (pMechanism->mechanism == CKM_EDDSA) {
+        if (curve != TR01_CURVE_ED25519) {
+            LT_PKCS11_LOG("EdDSA requires Ed25519 key, got P256: CKR_KEY_TYPE_INCONSISTENT");
+            return CKR_KEY_TYPE_INCONSISTENT;
+        }
+    } else {
+        LT_PKCS11_LOG("Unsupported mechanism 0x%lx: CKR_MECHANISM_INVALID", pMechanism->mechanism);
+        return CKR_MECHANISM_INVALID;
+    }
+    
+    /* Initialize sign state */
+    pkcs11_ctx.sign_active = CK_TRUE;
+    pkcs11_ctx.sign_mechanism = pMechanism->mechanism;
+    pkcs11_ctx.sign_key_slot = slot;
+    pkcs11_ctx.sign_key_curve = curve;
+    
+    LT_PKCS11_LOG("C_SignInit OK (slot=%u, mechanism=0x%lx, curve=%d)", 
+        slot, pMechanism->mechanism, curve);
+    return CKR_OK;
+}
+
+CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
+             CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen) {
+    LT_PKCS11_LOG("C_Sign (hSession=0x%lx, pData=%p, ulDataLen=%lu, pSignature=%p, pulSignatureLen=%p)",
+        hSession, pData, ulDataLen, pSignature, pulSignatureLen);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Check if sign operation is active */
+    if (!pkcs11_ctx.sign_active) {
+        LT_PKCS11_LOG("No sign operation active: CKR_OPERATION_NOT_INITIALIZED");
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+    
+    /* Validate parameters */
+    if (!pData || ulDataLen == 0 || !pulSignatureLen) {
+        LT_PKCS11_LOG("Invalid arguments: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Signature is always 64 bytes (R + S) */
+    if (pSignature == NULL) {
+        /* Query mode - return required signature length */
+        *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
+        LT_PKCS11_LOG("Query mode: signature length = %lu", *pulSignatureLen);
+        return CKR_OK;
+    }
+    
+    /* Check output buffer size */
+    if (*pulSignatureLen < TR01_ECDSA_EDDSA_SIGNATURE_LENGTH) {
+        *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
+        LT_PKCS11_LOG("Buffer too small: CKR_BUFFER_TOO_SMALL");
+        return CKR_BUFFER_TOO_SMALL;
+    }
+    
+    lt_ret_t ret;
+    
+    /* Perform signing based on mechanism */
+    if (pkcs11_ctx.sign_mechanism == CKM_ECDSA) {
+        LT_PKCS11_LOG("Performing ECDSA sign on slot %u", pkcs11_ctx.sign_key_slot);
+        ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+                                pData, ulDataLen, pSignature);
+    } else {
+        /* CKM_EDDSA */
+        LT_PKCS11_LOG("Performing EdDSA sign on slot %u", pkcs11_ctx.sign_key_slot);
+        ret = lt_ecc_eddsa_sign(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+                                pData, (uint16_t)ulDataLen, pSignature);
+    }
+    
+    /* Clear sign state (operation is complete) */
+    pkcs11_ctx.sign_active = CK_FALSE;
+    pkcs11_ctx.sign_mechanism = 0;
+    pkcs11_ctx.sign_key_slot = 0;
+    pkcs11_ctx.sign_key_curve = 0;
+    
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("Signing failed: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
+    
+    LT_PKCS11_LOG("C_Sign OK (signature length = %lu)", *pulSignatureLen);
+    return CKR_OK;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * KEY GENERATION FUNCTIONS
+ * --------------------------------------------------------------------------
+ * 
+ * Generate ECC key pairs (P-256 or Ed25519) in TROPIC01's secure key slots.
+ * Private keys never leave the chip - only the public key is readable.
+ */
+
+/* ---------------------------------------------------------------------------
+ * MECHANISM FUNCTIONS
+ * --------------------------------------------------------------------------
+ */
+
+/* Supported mechanisms */
+static const CK_MECHANISM_TYPE supported_mechanisms[] = {
+    CKM_EC_KEY_PAIR_GEN,  /* ECC key generation */
+    CKM_ECDSA,            /* ECDSA signing */
+    CKM_EDDSA             /* EdDSA signing */
+};
+#define NUM_MECHANISMS (sizeof(supported_mechanisms) / sizeof(supported_mechanisms[0]))
+
+CK_RV C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList,
+                         CK_ULONG_PTR pulCount) {
+    LT_PKCS11_LOG("C_GetMechanismList (slotID=%lu, pMechanismList=%p, pulCount=%p)",
+        slotID, pMechanismList, pulCount);
+    
+    if (!pkcs11_ctx.initialized) {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    if (slotID != 0) {
+        return CKR_SLOT_ID_INVALID;
+    }
+    
+    if (!pulCount) {
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    if (pMechanismList == NULL) {
+        *pulCount = NUM_MECHANISMS;
+        return CKR_OK;
+    }
+    
+    if (*pulCount < NUM_MECHANISMS) {
+        *pulCount = NUM_MECHANISMS;
+        return CKR_BUFFER_TOO_SMALL;
+    }
+    
+    for (CK_ULONG i = 0; i < NUM_MECHANISMS; i++) {
+        pMechanismList[i] = supported_mechanisms[i];
+    }
+    *pulCount = NUM_MECHANISMS;
+    
+    return CKR_OK;
+}
+
+CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
+                         CK_MECHANISM_INFO_PTR pInfo) {
+    LT_PKCS11_LOG("C_GetMechanismInfo (slotID=%lu, type=0x%lx, pInfo=%p)",
+        slotID, type, pInfo);
+    
+    if (!pkcs11_ctx.initialized) {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    if (slotID != 0) {
+        return CKR_SLOT_ID_INVALID;
+    }
+    
+    if (!pInfo) {
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    memset(pInfo, 0, sizeof(CK_MECHANISM_INFO));
+    
+    switch (type) {
+        case CKM_EC_KEY_PAIR_GEN:
+            pInfo->ulMinKeySize = 256;
+            pInfo->ulMaxKeySize = 256;
+            pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_F_P;
+            break;
+        case CKM_ECDSA:
+            pInfo->ulMinKeySize = 256;
+            pInfo->ulMaxKeySize = 256;
+            pInfo->flags = CKF_SIGN | CKF_EC_F_P;
+            break;
+        case CKM_EDDSA:
+            pInfo->ulMinKeySize = 256;
+            pInfo->ulMaxKeySize = 256;
+            pInfo->flags = CKF_SIGN;
+            break;
+        default:
+            return CKR_MECHANISM_INVALID;
+    }
+    
+    return CKR_OK;
+}
+
+CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo) {
+    LT_PKCS11_LOG("C_GetSessionInfo (hSession=0x%lx, pInfo=%p)", hSession, pInfo);
+    
+    if (!pkcs11_ctx.initialized) {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    if (!pInfo) {
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    pInfo->slotID = 0;
+    pInfo->state = CKS_RW_PUBLIC_SESSION;
+    pInfo->flags = CKF_SERIAL_SESSION | CKF_RW_SESSION;
+    pInfo->ulDeviceError = 0;
+    
+    return CKR_OK;
+}
+
+CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
+              CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen) {
+    LT_PKCS11_LOG("C_Login (hSession=0x%lx, userType=%lu, pPin=%p, ulPinLen=%lu)",
+        hSession, userType, pPin, ulPinLen);
+    
+    /* TROPIC01 authentication is handled at session start via pairing keys.
+     * We don't use PIN-based login, so just return OK. */
+    
+    if (!pkcs11_ctx.initialized) {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Accept any login - real auth is via pairing keys */
+    LT_PKCS11_LOG("C_Login OK (no-op, auth via pairing keys)");
+    return CKR_OK;
+}
+
+CK_RV C_Logout(CK_SESSION_HANDLE hSession) {
+    LT_PKCS11_LOG("C_Logout (hSession=0x%lx)", hSession);
+    
+    if (!pkcs11_ctx.initialized) {
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* No-op - real session management via pairing keys */
+    return CKR_OK;
+}
+
+
+/* ---------------------------------------------------------------------------
+ * KEY GENERATION FUNCTIONS
+ * --------------------------------------------------------------------------
+ * 
+ * Generate ECC key pairs (P-256 or Ed25519) in TROPIC01's secure key slots.
+ * Private keys never leave the chip - only the public key is readable.
+ */
+
+/* DER-encoded OID for secp256r1 (P-256): 1.2.840.10045.3.1.7 */
+static const CK_BYTE OID_SECP256R1[] = {
+    0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+};
+
+/* DER-encoded OID for Ed25519: 1.3.101.112 */
+static const CK_BYTE OID_ED25519[] = {
+    0x06, 0x03, 0x2B, 0x65, 0x70
+};
+
+CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
+                        CK_MECHANISM_PTR pMechanism,
+                        CK_ATTRIBUTE_PTR pPublicKeyTemplate, CK_ULONG ulPublicKeyAttributeCount,
+                        CK_ATTRIBUTE_PTR pPrivateKeyTemplate, CK_ULONG ulPrivateKeyAttributeCount,
+                        CK_OBJECT_HANDLE_PTR phPublicKey, CK_OBJECT_HANDLE_PTR phPrivateKey) {
+    LT_PKCS11_LOG("C_GenerateKeyPair (hSession=0x%lx, pMechanism=%p)", hSession, pMechanism);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate parameters */
+    if (!pMechanism || !phPublicKey || !phPrivateKey) {
+        LT_PKCS11_LOG("Invalid arguments: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Check mechanism - we support EC key generation */
+    if (pMechanism->mechanism != CKM_EC_KEY_PAIR_GEN) {
+        LT_PKCS11_LOG("Unsupported mechanism 0x%lx: CKR_MECHANISM_INVALID", pMechanism->mechanism);
+        return CKR_MECHANISM_INVALID;
+    }
+    
+    /* Parse templates to find curve (EC_PARAMS) and slot (ID) */
+    lt_ecc_curve_type_t curve = TR01_CURVE_P256;  /* Default to P-256 */
+    CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
+    
+    /* Check public key template for EC_PARAMS (curve) and ID (slot) */
+    for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++) {
+        if (pPublicKeyTemplate[i].type == CKA_EC_PARAMS && pPublicKeyTemplate[i].pValue) {
+            /* Check if it's secp256r1 or Ed25519 */
+            if (pPublicKeyTemplate[i].ulValueLen == sizeof(OID_SECP256R1) &&
+                memcmp(pPublicKeyTemplate[i].pValue, OID_SECP256R1, sizeof(OID_SECP256R1)) == 0) {
+                curve = TR01_CURVE_P256;
+                LT_PKCS11_LOG("  Curve: P-256 (secp256r1)");
+            } else if (pPublicKeyTemplate[i].ulValueLen == sizeof(OID_ED25519) &&
+                       memcmp(pPublicKeyTemplate[i].pValue, OID_ED25519, sizeof(OID_ED25519)) == 0) {
+                curve = TR01_CURVE_ED25519;
+                LT_PKCS11_LOG("  Curve: Ed25519");
+            } else {
+                LT_PKCS11_LOG("Unsupported curve OID: CKR_ATTRIBUTE_VALUE_INVALID");
+                return CKR_ATTRIBUTE_VALUE_INVALID;
+            }
+        } else if (pPublicKeyTemplate[i].type == CKA_ID && pPublicKeyTemplate[i].pValue) {
+            /* Parse ID as slot number */
+            if (pPublicKeyTemplate[i].ulValueLen > 0) {
+                uint8_t *id_bytes = (uint8_t*)pPublicKeyTemplate[i].pValue;
+                slot_id = 0;
+                for (CK_ULONG j = 0; j < pPublicKeyTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
+                    slot_id = (slot_id << 8) | id_bytes[j];
+                }
+                LT_PKCS11_LOG("  Slot ID from public template: %lu", slot_id);
+            }
+        }
+    }
+    
+    /* Also check private key template for ID */
+    if (slot_id == CK_UNAVAILABLE_INFORMATION) {
+        for (CK_ULONG i = 0; i < ulPrivateKeyAttributeCount; i++) {
+            if (pPrivateKeyTemplate[i].type == CKA_ID && pPrivateKeyTemplate[i].pValue) {
+                if (pPrivateKeyTemplate[i].ulValueLen > 0) {
+                    uint8_t *id_bytes = (uint8_t*)pPrivateKeyTemplate[i].pValue;
+                    slot_id = 0;
+                    for (CK_ULONG j = 0; j < pPrivateKeyTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
+                        slot_id = (slot_id << 8) | id_bytes[j];
+                    }
+                    LT_PKCS11_LOG("  Slot ID from private template: %lu", slot_id);
+                }
+            }
+        }
+    }
+    
+    /* If no slot specified, find first empty slot */
+    if (slot_id == CK_UNAVAILABLE_INFORMATION) {
+        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
+        lt_ecc_curve_type_t existing_curve;
+        lt_ecc_key_origin_t origin;
+        
+        for (uint8_t i = 0; i <= TR01_ECC_SLOT_31; i++) {
+            lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)i,
+                                           pubkey_buf, sizeof(pubkey_buf), &existing_curve, &origin);
+            if (ret == LT_L3_ECC_INVALID_KEY) {
+                /* Found empty slot */
+                slot_id = i;
+                LT_PKCS11_LOG("  Auto-selected empty ECC slot: %lu", slot_id);
+                break;
+            }
+        }
+        
+        if (slot_id == CK_UNAVAILABLE_INFORMATION) {
+            LT_PKCS11_LOG("No empty ECC slots available: CKR_DEVICE_MEMORY");
+            return CKR_DEVICE_MEMORY;
+        }
+    }
+    
+    /* Validate slot range */
+    if (slot_id > TR01_ECC_SLOT_31) {
+        LT_PKCS11_LOG("Invalid slot ID %lu (max %d): CKR_ATTRIBUTE_VALUE_INVALID", 
+            slot_id, TR01_ECC_SLOT_31);
+        return CKR_ATTRIBUTE_VALUE_INVALID;
+    }
+    
+    /* Generate the key pair on TROPIC01 */
+    LT_PKCS11_LOG("Generating %s key in ECC slot %lu...", 
+        (curve == TR01_CURVE_P256) ? "P-256" : "Ed25519", slot_id);
+    
+    lt_ret_t ret = lt_ecc_key_generate(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot_id, curve);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("Key generation failed: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        return CKR_DEVICE_ERROR;
+    }
+    
+    /* Return handles for both keys */
+    *phPrivateKey = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot_id);
+    *phPublicKey = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot_id);
+    
+    LT_PKCS11_LOG("C_GenerateKeyPair OK (slot=%lu, privKey=0x%lx, pubKey=0x%lx)", 
+        slot_id, *phPrivateKey, *phPublicKey);
+    return CKR_OK;
+}
+
+CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
      LT_PKCS11_LOG("========================================");
-     LT_PKCS11_LOG(">>> C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
-     LT_PKCS11_LOG(">>> LOADING TROPIC PKCS#11 LIBRARY");
+     LT_PKCS11_LOG("C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
+     LT_PKCS11_LOG("LOADING TROPIC PKCS#11 LIBRARY");
      LT_PKCS11_LOG("========================================");
      
      /* Validate parameter */
      if (!ppFunctionList) {
-         LT_PKCS11_LOG(">>> ppFunctionList is NULL - returning CKR_ARGUMENTS_BAD");
+         LT_PKCS11_LOG("ppFunctionList is NULL: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      
-     /* =========================================================================
+     /* -----------------------------------------------------------------------
       * THE FUNCTION LIST
-      * =========================================================================
+       -----------------------------------------------------------------------
       * 
       * This structure contains pointers to ALL PKCS#11 functions.
       * The structure is defined in pkcs11.h.
@@ -1173,8 +1841,8 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          .C_GetSlotList = C_GetSlotList,         /* List available slots */
          .C_GetSlotInfo = C_GetSlotInfo,         /* Get info about a slot */
          .C_GetTokenInfo = C_GetTokenInfo,       /* Get info about token in slot */
-         .C_GetMechanismList = NULL,             /* List supported mechanisms (not implemented) */
-         .C_GetMechanismInfo = NULL,             /* Get mechanism info (not implemented) */
+         .C_GetMechanismList = C_GetMechanismList, /* List supported mechanisms */
+         .C_GetMechanismInfo = C_GetMechanismInfo, /* Get mechanism info */
          .C_InitToken = NULL,                    /* Initialize a token (not implemented) */
          .C_InitPIN = NULL,                      /* Initialize user PIN (not implemented) */
          .C_SetPIN = NULL,                       /* Change user PIN (not implemented) */
@@ -1186,11 +1854,11 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          .C_OpenSession = C_OpenSession,         /* Open a session */
          .C_CloseSession = C_CloseSession,       /* Close a session */
          .C_CloseAllSessions = NULL,             /* Close all sessions (not implemented) */
-         .C_GetSessionInfo = NULL,               /* Get session info (not implemented) */
+         .C_GetSessionInfo = C_GetSessionInfo,   /* Get session info */
          .C_GetOperationState = NULL,            /* Get crypto operation state (not implemented) */
          .C_SetOperationState = NULL,            /* Set crypto operation state (not implemented) */
-         .C_Login = NULL,                        /* Log in to token (not implemented) */
-         .C_Logout = NULL,                       /* Log out from token (not implemented) */
+         .C_Login = C_Login,                     /* No-op login (auth via pairing keys) */
+         .C_Logout = C_Logout,                   /* No-op logout */
          
         /* =====================================================================
          * OBJECT MANAGEMENT
@@ -1235,16 +1903,17 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          .C_DigestKey = NULL,                    /* Include key in digest (not implemented) */
          .C_DigestFinal = NULL,                  /* Finish multi-part digest (not implemented) */
          
-         /* =====================================================================
-          * SIGNING AND MACING FUNCTIONS
-          * Functions for creating digital signatures.
-          * ===================================================================== */
-         .C_SignInit = NULL,                     /* Initialize signing (not implemented) */
-         .C_Sign = NULL,                         /* Create signature (not implemented) */
-         .C_SignUpdate = NULL,                   /* Continue multi-part signing (not implemented) */
-         .C_SignFinal = NULL,                    /* Finish multi-part signing (not implemented) */
-         .C_SignRecoverInit = NULL,              /* Init signing with data recovery (not implemented) */
-         .C_SignRecover = NULL,                  /* Sign with data recovery (not implemented) */
+        /* =====================================================================
+         * SIGNING AND MACING FUNCTIONS
+         * Functions for creating digital signatures.
+         * ECDSA (P256) and EdDSA (Ed25519) supported via TROPIC01.
+         * ===================================================================== */
+        .C_SignInit = C_SignInit,               /* Initialize ECDSA/EdDSA signing */
+        .C_Sign = C_Sign,                       /* Perform signature on TROPIC01 */
+        .C_SignUpdate = NULL,                   /* Continue multi-part signing (not implemented) */
+        .C_SignFinal = NULL,                    /* Finish multi-part signing (not implemented) */
+        .C_SignRecoverInit = NULL,              /* Init signing with data recovery (not implemented) */
+        .C_SignRecover = NULL,                  /* Sign with data recovery (not implemented) */
          
          /* =====================================================================
           * SIGNATURE VERIFICATION FUNCTIONS
@@ -1271,7 +1940,7 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
           * Functions for key generation and key wrapping.
           * ===================================================================== */
          .C_GenerateKey = NULL,                  /* Generate symmetric key (not implemented) */
-         .C_GenerateKeyPair = NULL,              /* Generate asymmetric key pair (not implemented) */
+         .C_GenerateKeyPair = C_GenerateKeyPair, /* Generate ECC key pair (P-256 or Ed25519) */
          .C_WrapKey = NULL,                      /* Wrap (encrypt) a key (not implemented) */
          .C_UnwrapKey = NULL,                    /* Unwrap (decrypt) a key (not implemented) */
          .C_DeriveKey = NULL,                    /* Derive a key from another (not implemented) */
@@ -1295,12 +1964,12 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
      *ppFunctionList = &functionList;
      
      /* Log some info about the function pointers (for debugging) */
-     LT_PKCS11_LOG(">>> C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
-     LT_PKCS11_LOG(">>> Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
+     LT_PKCS11_LOG("C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
+     LT_PKCS11_LOG("Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
          functionList.C_Initialize, functionList.C_Finalize, functionList.C_GetInfo);
-     LT_PKCS11_LOG(">>> Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
+     LT_PKCS11_LOG("Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
          functionList.C_OpenSession, functionList.C_CloseSession, functionList.C_CloseAllSessions);
-     LT_PKCS11_LOG(">>> Actual function: C_OpenSession=%p", C_OpenSession);
+     LT_PKCS11_LOG("Actual function: C_OpenSession=%p", C_OpenSession);
      
      return CKR_OK;
  }

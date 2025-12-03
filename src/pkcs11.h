@@ -1,69 +1,14 @@
 /**
  * @file pkcs11.h
- * @brief PKCS#11 Module for TROPIC01 Secure Element
+ * @brief PKCS#11 v2.40 Cryptoki header for TROPIC01 Secure Element
  * @copyright Copyright (c) 2020-2025 Tropic Square s.r.o.
+ * @license See LICENSE.md in the root directory
  *
- * @license For the license see file LICENSE.md file in the root directory of this source tree.
+ * Simplified PKCS#11 header implementing types, constants, and structures
+ * required for TROPIC01 integration. Compatible with standard tools like
+ * pkcs11-tool, OpenSSL, and other PKCS#11 consumers.
  *
- * ============================================================================
- * WHAT IS PKCS#11?
- * ============================================================================
- * 
- * PKCS#11 (Public-Key Cryptography Standards #11), also known as "Cryptoki" 
- * (Cryptographic Token Interface), is a platform-independent API standard 
- * for accessing cryptographic hardware devices (tokens).
- * 
- * Common PKCS#11 tokens include:
- * - Hardware Security Modules (HSMs)
- * - Smart cards
- * - USB security keys
- * - Secure elements (like TROPIC01)
- * 
- * The API allows applications to:
- * - Generate and store cryptographic keys
- * - Perform encryption/decryption
- * - Create and verify digital signatures
- * - Generate random numbers
- * - Manage certificates and objects
- * 
- * ============================================================================
- * HOW PKCS#11 MODULES WORK
- * ============================================================================
- * 
- * 1. Application loads the shared library (.so on Linux, .dll on Windows)
- * 2. Application calls C_GetFunctionList() to get pointers to all functions
- * 3. Application calls C_Initialize() to initialize the library
- * 4. Application interacts with tokens through the function pointers
- * 5. Application calls C_Finalize() to clean up
- * 
- * ============================================================================
- * ABOUT THIS HEADER FILE
- * ============================================================================
- * 
- * This is a simplified PKCS#11 v2.40 header focused on the functionality 
- * needed for TROPIC01 integration. It includes:
- * - Basic type definitions (CK_BYTE, CK_ULONG, etc.)
- * - Return value constants (CKR_OK, CKR_GENERAL_ERROR, etc.)
- * - Key structures (CK_INFO, CK_SLOT_INFO, CK_TOKEN_INFO, etc.)
- * - The CK_FUNCTION_LIST structure with all 68 standard function pointers
- * 
- * This file must be PKCS#11 v2.40 compliant to work with standard tools
- * like pkcs11-tool, OpenSSL, Firefox, etc.
- * 
- * ============================================================================
- * IMPORTANT: CK_FUNCTION_LIST STRUCTURE ORDER
- * ============================================================================
- * 
- * The CK_FUNCTION_LIST structure MUST contain function pointers in the exact
- * order specified by the PKCS#11 standard. Applications expect functions at
- * specific byte offsets. If the order is wrong or functions are missing,
- * applications will call the wrong functions or crash.
- * 
- * Reference: OASIS PKCS#11 Cryptographic Token Interface Base Specification v2.40
- * https://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/pkcs11-base-v2.40.html
- * 
- * @version 2.40 (PKCS#11 specification version)
- * @author Tropic Square s.r.o.
+ * Reference: OASIS PKCS#11 Base Specification v2.40
  */
 
 #ifndef _PKCS11_H_
@@ -89,9 +34,9 @@ extern "C" {
     #define LT_PKCS11_LOG(...) LT_PKCS11_LOG_DISABLED(__VA_ARGS__)
 #endif
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * PKCS#11 VERSION CONSTANTS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * These define which version of the PKCS#11 specification we implement.
  * Version 2.40 is widely supported and includes all modern cryptographic
  * operations.
@@ -99,9 +44,9 @@ extern "C" {
 #define CRYPTOKI_VERSION_MAJOR 2
 #define CRYPTOKI_VERSION_MINOR 40
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * BASIC TYPE DEFINITIONS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * PKCS#11 defines its own types to ensure portability across different
  * platforms and compilers. These types have specific sizes and meanings.
  * 
@@ -198,20 +143,20 @@ typedef CK_CHAR*          CK_CHAR_PTR;      /**< Pointer to character string */
 typedef CK_UTF8CHAR*      CK_UTF8CHAR_PTR;  /**< Pointer to UTF-8 string */
 typedef CK_ULONG*         CK_ULONG_PTR;     /**< Pointer to unsigned long */
 typedef CK_MECHANISM_TYPE* CK_MECHANISM_TYPE_PTR; /**< Pointer to mechanism type */
-typedef void*             CK_MECHANISM_INFO_PTR;  /**< Pointer to mechanism info */
+/* CK_MECHANISM_INFO_PTR defined after CK_MECHANISM_INFO struct below */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * NOTIFICATION TYPES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Notifications are callbacks the token can use to inform the application
  * of events (like token removal). Rarely used in practice.
  */
 typedef CK_ULONG CK_NOTIFICATION;
 typedef CK_RV (*CK_NOTIFY)(CK_SESSION_HANDLE session, CK_NOTIFICATION event, CK_VOID_PTR application);
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * OBJECT CLASSES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Every object on a token has a class that defines what kind of object it is.
  * This determines what attributes are valid and what operations can be performed.
  */
@@ -224,9 +169,9 @@ typedef CK_ULONG CK_OBJECT_CLASS;
 #define CKO_SECRET_KEY      0x00000004  /**< Symmetric key (AES, etc.) */
 #define CKO_VENDOR_DEFINED  0x80000000  /**< Vendor-specific object types */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * KEY TYPES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Specifies the cryptographic algorithm a key is used for.
  */
 typedef CK_ULONG CK_KEY_TYPE;
@@ -235,27 +180,28 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKK_DSA             0x00000001  /**< DSA key */
 #define CKK_DH              0x00000002  /**< Diffie-Hellman key */
 #define CKK_EC              0x00000003  /**< Elliptic Curve key (ECDSA, ECDH) */
+#define CKK_EC_EDWARDS      0x00000040  /**< Edwards curve key (Ed25519, Ed448) */
 #define CKK_VENDOR_DEFINED  0x80000000  /**< Vendor-specific key types */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * USER TYPES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Different user roles have different privileges on the token.
  */
 #define CKU_SO              0UL  /**< Security Officer - can initialize token, set PINs */
 #define CKU_USER            1UL  /**< Normal User - can use keys after login */
 #define CKU_CONTEXT_SPECIFIC 2UL /**< Context-specific login for specific operations */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * BOOLEAN CONSTANTS
- * ============================================================================
+ * --------------------------------------------------------------------------
  */
 #define CK_TRUE  1   /**< Boolean true */
 #define CK_FALSE 0   /**< Boolean false */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * RETURN VALUES (CK_RV)
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Every PKCS#11 function returns one of these values.
  * Always check the return value! CKR_OK means success.
  * 
@@ -298,18 +244,19 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CK_UNAVAILABLE_INFORMATION              (~0UL)      /**< Value not available/applicable */
 #define CK_EFFECTIVELY_INFINITE                 0           /**< Unlimited (for session counts) */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * CRYPTOGRAPHIC MECHANISMS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Mechanisms specify which cryptographic algorithm and mode to use.
  * Example: CKM_ECDSA means "use ECDSA for signing/verification"
  */
 #define CKM_EC_KEY_PAIR_GEN                     0x00001040  /**< Generate EC key pair */
 #define CKM_ECDSA                               0x00001041  /**< ECDSA sign/verify */
+#define CKM_EDDSA                               0x00001057  /**< EdDSA sign/verify (Ed25519, Ed448) */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * OBJECT ATTRIBUTES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Attributes describe properties of objects. Each attribute has a type
  * (like CKA_CLASS) and a value.
  * 
@@ -320,36 +267,81 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKA_TOKEN                               0x00000001  /**< True if stored on token */
 #define CKA_PRIVATE                             0x00000002  /**< True if login required */
 #define CKA_LABEL                               0x00000003  /**< Human-readable name */
+#define CKA_APPLICATION                         0x00000010  /**< Application that manages object */
 #define CKA_VALUE                               0x00000011  /**< Object value (data content) */
 #define CKA_KEY_TYPE                            0x00000100  /**< Key type (CKK_*) */
 #define CKA_ID                                  0x00000102  /**< Object identifier */
+#define CKA_SENSITIVE                           0x00000103  /**< True if key is sensitive */
+#define CKA_ENCRYPT                             0x00000104  /**< True if key can encrypt */
+#define CKA_DECRYPT                             0x00000105  /**< True if key can decrypt */
+#define CKA_WRAP                                0x00000106  /**< True if key can wrap */
+#define CKA_UNWRAP                              0x00000107  /**< True if key can unwrap */
 #define CKA_SIGN                                0x00000108  /**< True if key can sign */
+#define CKA_SIGN_RECOVER                        0x00000109  /**< True if key can sign with recovery */
 #define CKA_VERIFY                              0x0000010A  /**< True if key can verify */
+#define CKA_VERIFY_RECOVER                      0x0000010B  /**< True if key can verify with recovery */
+#define CKA_DERIVE                              0x0000010C  /**< True if key can derive */
+#define CKA_EXTRACTABLE                         0x00000162  /**< True if key can be extracted */
+#define CKA_LOCAL                               0x00000163  /**< True if key was generated locally */
+#define CKA_NEVER_EXTRACTABLE                   0x00000164  /**< True if key was never extractable */
+#define CKA_ALWAYS_SENSITIVE                    0x00000165  /**< True if key was always sensitive */
+#define CKA_ALWAYS_AUTHENTICATE                 0x00000202  /**< True if auth required for each use */
 #define CKA_EC_PARAMS                           0x00000180  /**< EC curve parameters (DER) */
+#define CKA_EC_POINT                            0x00000181  /**< EC public key point (DER OCTET STRING) */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * SESSION FLAGS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Flags passed to C_OpenSession() to specify session properties.
  */
 #define CKF_RW_SESSION                          0x00000002  /**< Read-write session (can modify) */
 #define CKF_SERIAL_SESSION                      0x00000004  /**< Required flag (legacy) */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
+ * SESSION STATES
+ * --------------------------------------------------------------------------
+ */
+#define CKS_RO_PUBLIC_SESSION                   0  /**< Read-only public session */
+#define CKS_RO_USER_FUNCTIONS                   1  /**< Read-only user session */
+#define CKS_RW_PUBLIC_SESSION                   2  /**< Read-write public session */
+#define CKS_RW_USER_FUNCTIONS                   3  /**< Read-write user session */
+#define CKS_RW_SO_FUNCTIONS                     4  /**< Read-write SO session */
+
+/* ---------------------------------------------------------------------------
+ * MECHANISM FLAGS
+ * --------------------------------------------------------------------------
+ */
+#define CKF_ENCRYPT                             0x00000100  /**< Mechanism can encrypt */
+#define CKF_DECRYPT                             0x00000200  /**< Mechanism can decrypt */
+#define CKF_DIGEST                              0x00000400  /**< Mechanism can digest */
+#define CKF_SIGN                                0x00000800  /**< Mechanism can sign */
+#define CKF_SIGN_RECOVER                        0x00001000  /**< Mechanism can sign with recovery */
+#define CKF_VERIFY                              0x00002000  /**< Mechanism can verify */
+#define CKF_VERIFY_RECOVER                      0x00004000  /**< Mechanism can verify with recovery */
+#define CKF_GENERATE                            0x00008000  /**< Mechanism can generate key */
+#define CKF_GENERATE_KEY_PAIR                   0x00010000  /**< Mechanism can generate key pair */
+#define CKF_WRAP                                0x00020000  /**< Mechanism can wrap key */
+#define CKF_UNWRAP                              0x00040000  /**< Mechanism can unwrap key */
+#define CKF_DERIVE                              0x00080000  /**< Mechanism can derive key */
+#define CKF_EC_F_P                              0x00100000  /**< EC over Fp */
+#define CKF_EC_F_2M                             0x00200000  /**< EC over F2m */
+
+/* ---------------------------------------------------------------------------
  * SLOT AND TOKEN FLAGS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * Flags in CK_SLOT_INFO.flags and CK_TOKEN_INFO.flags describing
  * capabilities and state.
  */
 #define CKF_TOKEN_PRESENT                       0x00000001  /**< Token is in the slot */
+#define CKF_TOKEN_INITIALIZED                   0x00000004  /**< Token has been initialized */
 #define CKF_HW_SLOT                             0x00000004  /**< Hardware slot (not virtual) */
 #define CKF_RNG                                 0x00000008  /**< Token has RNG */
 #define CKF_LOGIN_REQUIRED                      0x00000100  /**< Login required for private objects */
 #define CKF_USER_PIN_INITIALIZED                0x00000400  /**< User PIN has been set */
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * STRUCTURES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * These structures are filled by the token and returned to the application.
  */
 
@@ -431,6 +423,20 @@ typedef struct CK_SESSION_INFO {
     CK_ULONG      ulDeviceError; /**< Device-specific error code */
 } CK_SESSION_INFO;
 
+typedef CK_SESSION_INFO* CK_SESSION_INFO_PTR;  /**< Pointer to session info */
+
+/**
+ * CK_MECHANISM_INFO - Information about a mechanism
+ * Returned by: C_GetMechanismInfo()
+ */
+typedef struct CK_MECHANISM_INFO {
+    CK_ULONG    ulMinKeySize;  /**< Minimum key size in bits */
+    CK_ULONG    ulMaxKeySize;  /**< Maximum key size in bits */
+    CK_FLAGS    flags;         /**< Mechanism flags (CKF_SIGN, etc.) */
+} CK_MECHANISM_INFO;
+
+typedef CK_MECHANISM_INFO* CK_MECHANISM_INFO_PTR;  /**< Pointer to mechanism info */
+
 /**
  * CK_ATTRIBUTE - An attribute type/value pair
  * Used in: Templates for creating, finding, and reading objects
@@ -461,9 +467,9 @@ typedef struct CK_MECHANISM {
 
 typedef CK_MECHANISM* CK_MECHANISM_PTR;
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * FUNCTION LIST FORWARD DECLARATIONS
- * ============================================================================
+ * --------------------------------------------------------------------------
  * The CK_FUNCTION_LIST structure contains pointers to all PKCS#11 functions.
  * We need to forward-declare it before defining the pointer types.
  */
@@ -479,9 +485,9 @@ typedef CK_SLOT_ID* CK_SLOT_ID_PTR;
 typedef CK_SESSION_HANDLE* CK_SESSION_HANDLE_PTR;
 typedef CK_OBJECT_HANDLE* CK_OBJECT_HANDLE_PTR;
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * FUNCTION PROTOTYPES
- * ============================================================================
+ * --------------------------------------------------------------------------
  * These are the actual function declarations that our module implements.
  * Not all functions need to be implemented - unimplemented ones return
  * CKR_FUNCTION_NOT_SUPPORTED.
@@ -545,9 +551,9 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved);
 CK_RV C_GetInfo(CK_INFO_PTR pInfo);
 
 
-/* ==================================================================================
+/* ---------------------------------------------------------------------------======
  * FUNCTION LIST - THE HEART OF PKCS#11
- * ==================================================================================
+ * --------------------------------------------------------------------------======
  * 
  * C_GetFunctionList is the MOST IMPORTANT function in PKCS#11.
  * It's the ONLY function that applications call directly (by name).
@@ -694,7 +700,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
  */
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession);
 CK_RV C_CloseAllSessions(CK_SLOT_ID slotID);
-CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, void* pInfo);
+CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo);
 
 /* --- Login/Logout --- */
 CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType, CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen);
@@ -763,9 +769,9 @@ CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSee
  */
 CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen);
 
-/* ============================================================================
+/* ---------------------------------------------------------------------------
  * CK_FUNCTION_LIST STRUCTURE
- * ============================================================================
+ * --------------------------------------------------------------------------
  * 
  * This is the MOST IMPORTANT structure in PKCS#11!
  * 
@@ -866,7 +872,7 @@ struct CK_FUNCTION_LIST {
     CK_RV (*C_CloseAllSessions)(CK_SLOT_ID slotID);
     
     /** Slot 15: Get information about a session. */
-    CK_RV (*C_GetSessionInfo)(CK_SESSION_HANDLE hSession, void* pInfo);
+    CK_RV (*C_GetSessionInfo)(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo);
     
     /** Slot 16: Save cryptographic operation state. */
     CK_RV (*C_GetOperationState)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pOperationState, CK_ULONG_PTR pulOperationStateLen);
