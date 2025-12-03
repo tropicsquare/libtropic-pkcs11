@@ -6,7 +6,7 @@ set -e
 rm -rf build
 mkdir build
 cd build
-cmake ..
+cmake -DTS_USB_DEV="/dev/ttyACM0" ..
 make
 
 # Path to the built PKCS11 module
@@ -29,4 +29,3 @@ echo "=========================================="
 echo "Example 3: Show module info (-I)"
 echo "=========================================="
 pkcs11-tool --module "$MODULE_PATH" -I
-

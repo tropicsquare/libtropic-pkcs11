@@ -99,23 +99,23 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
          return CKR_CRYPTOKI_ALREADY_INITIALIZED;
      }
      
-     /* =========================================================================
-      * STEP 1: CONFIGURE USB DEVICE
-      * =========================================================================
-      * 
-      * Set up the USB dongle configuration that will be used for all
-      * communication with TROPIC01.
-      * 
-      * dev_path: The Linux device file for the USB serial port.
-      *           Usually /dev/ttyACM0 for the first USB ACM device.
-      *           May be different if multiple USB devices are connected.
-      * 
-      * baud_rate: Serial communication speed (115200 baud for TROPIC01)
-      * 
-      * rng_seed: Seed for software RNG (used as fallback, not for our HWRNG)
-      */
+    /* =========================================================================
+     * STEP 1: CONFIGURE USB DEVICE
+     * =========================================================================
+     * 
+     * Set up the USB dongle configuration that will be used for all
+     * communication with TROPIC01.
+     * 
+     * dev_path: The Linux device file for the USB serial port.
+     *           Configured via CMake option TS_USB_DEV
+     *           (default: /dev/ttyACM0).
+     * 
+     * baud_rate: Serial communication speed (115200 baud for TROPIC01)
+     * 
+     * rng_seed: Seed for software RNG (used as fallback, not for our HWRNG)
+     */
      memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
-     strncpy(pkcs11_ctx.lt_device.dev_path, "/dev/ttyACM0", sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
+     strncpy(pkcs11_ctx.lt_device.dev_path, TS_USB_DEV, sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
      pkcs11_ctx.lt_device.baud_rate = 115200;
      pkcs11_ctx.lt_device.rng_seed = (unsigned int)time(NULL);
      

@@ -7,6 +7,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 # Enable logging (use ON/OFF)
 option(LT_PKCS11_LOG_EN "Enable PKCS11 logging" OFF)
 
+# USB device path for TROPIC01 communication
+set(TS_USB_DEV "/dev/ttyACM0" CACHE STRING "Device path for TROPIC01 USB dongle")
+
 # Set path to libtropic (inside libtropic-linux)
 set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
 
@@ -40,3 +43,6 @@ if(LT_PKCS11_LOG_EN)
 else()
     target_compile_definitions(libtropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=0)
 endif()
+
+# Pass device path as a compile definition (with quotes for string literal)
+target_compile_definitions(libtropic_pkcs11 PRIVATE TS_USB_DEV="${TS_USB_DEV}")
