@@ -666,7 +666,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
      
      /* Accept the seed but do nothing - HWRNG doesn't need external seeding */
      LT_PKCS11_LOG(">>> C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
-     return CKR_OK;
+     return CKR_FUNCTION_NOT_SUPPORTED;
  }
  
  CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
@@ -819,7 +819,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
          /* =====================================================================
           * RANDOM NUMBER GENERATION - OUR MAIN FEATURE!
           * ===================================================================== */
-         .C_SeedRandom = C_SeedRandom,           /* Seed the RNG (no-op for HWRNG) */
+         .C_SeedRandom = NULL,                   /* Seed the RNG (no-op for HWRNG) - Not implemented */
          .C_GenerateRandom = C_GenerateRandom,   /* *** GENERATE RANDOM BYTES FROM TROPIC01 *** */
          
          /* =====================================================================
