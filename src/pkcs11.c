@@ -218,67 +218,13 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
  CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
      LT_PKCS11_LOG(">>> C_GetInfo (pInfo=%p)", pInfo);
      
-     /* Validate parameter */
-     if (!pInfo) {
-         LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
- 
-     /* 
-      * If the library is initialized, read chip info using the global handle.
-      * This does NOT require a secure session - chip freely provides this info.
-      */
-     if (pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG(">>> Reading TROPIC01 chip info...");
-         
-         /* Read RISC-V firmware version
-          * 
-          * TROPIC01 has a RISC-V processor running application firmware.
-          * Version format: major.minor.patch.build (stored in reverse order)
-          */
-         uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-         if (ret == LT_OK) {
-             LT_PKCS11_LOG(">>> RISC-V FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
-         } else {
-             LT_PKCS11_LOG(">>> Failed to get RISC-V FW version: %s", lt_ret_verbose(ret));
-         }
-         
-         /* Read SPECT firmware version
-          * 
-          * SPECT is the cryptographic coprocessor inside TROPIC01.
-          * It handles all crypto operations (RNG, ECC, AES, etc.)
-          */
-         ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-         if (ret == LT_OK) {
-             LT_PKCS11_LOG(">>> SPECT FW version: %d.%d.%d.%d", fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
-         } else {
-             LT_PKCS11_LOG(">>> Failed to get SPECT FW version: %s", lt_ret_verbose(ret));
-         }
-         
-         /* Read chip ID
-          * 
-          * Contains detailed chip information:
-          * - Serial number (unique per chip)
-          * - Part number
-          * - Batch ID
-          * - Provisioning info
-          * - Manufacturing date
-          * - And more...
-          */
-         struct lt_chip_id_t chip_id = {0};
-         ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
-         if (ret == LT_OK) {
-             LT_PKCS11_LOG(">>> Chip ID:");
-             lt_print_chip_id(&chip_id, printf);
-         } else {
-             LT_PKCS11_LOG(">>> Failed to get chip ID: %s", lt_ret_verbose(ret));
-         }
-     } else {
-         LT_PKCS11_LOG(">>> Library not initialized - skipping chip info");
-     }
- 
-     /* =========================================================================
+    /* Validate parameter */
+    if (!pInfo) {
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+
+    /* =========================================================================
       * FILL IN PKCS#11 LIBRARY INFO
       * =========================================================================
       * 
