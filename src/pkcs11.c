@@ -321,108 +321,104 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {
      return CKR_OK;
  }
  
- CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
-     LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
-     
-     /* We only support slot ID 1 */
-     if (slotID != 1) { 
-         LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
-         return CKR_SLOT_ID_INVALID;
-     }
-     
-     /* pInfo is required */
-     if (!pInfo) {
-         LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     /* Fill in token information */
-     memset(pInfo, 0, sizeof(CK_TOKEN_INFO));
-     
-     /* Manufacturer is always TropicSquare */
-     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
-     
-     /* Token capabilities */
-     pInfo->flags = CKF_RNG;  /* This token has a hardware RNG! */
-     
-     /* Session limits */
-     pInfo->ulMaxSessionCount = 1;      /* We support only one session at a time */
-     pInfo->ulSessionCount = pkcs11_ctx.session_open ? 1 : 0;
-     pInfo->ulMaxRwSessionCount = 1;
-     pInfo->ulRwSessionCount = pkcs11_ctx.session_open ? 1 : 0;
-     
-     /* PIN is not used - we use pairing keys instead */
-     pInfo->ulMaxPinLen = 0;
-     pInfo->ulMinPinLen = 0;
-     
-     /* Memory info - we report unknown */
-     pInfo->ulTotalPublicMemory = CK_UNAVAILABLE_INFORMATION;
-     pInfo->ulFreePublicMemory = CK_UNAVAILABLE_INFORMATION;
-     pInfo->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
-     pInfo->ulFreePrivateMemory = CK_UNAVAILABLE_INFORMATION;
-     
-     /* Read chip info and populate dynamic fields */
-     if (pkcs11_ctx.initialized) {
-         /* Get firmware versions */
-         uint8_t fw_ver[4] = {0};
-         lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-         if (ret == LT_OK) {
-             pInfo->firmwareVersion.major = fw_ver[3];
-             pInfo->firmwareVersion.minor = fw_ver[2];
-         }
-         
-         /* Get chip ID for label, model, serial number, etc. */
-         struct lt_chip_id_t chip_id = {0};
-         ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
-         if (ret == LT_OK) {
-             /* Hardware version from chip_id_ver array [major.minor.patch.build] */
-             pInfo->hardwareVersion.major = chip_id.chip_id_ver[0];
-             pInfo->hardwareVersion.minor = chip_id.chip_id_ver[1];
-             
-             /* Model from part_num_data (ASCII string with length prefix) */
-             /* part_num_data contains something like "TR01-C2P-T101" prefixed with length byte */
-             if (chip_id.part_num_data[0] > 0 && chip_id.part_num_data[0] < 16) {
-                 uint8_t model_len = chip_id.part_num_data[0];
-                 if (model_len > 15) model_len = 15;
-                 memcpy(pInfo->model, &chip_id.part_num_data[1], model_len);
-                 pInfo->model[model_len] = '\0';
-             } else {
-                 strncpy((char*)pInfo->model, "TROPIC01", 16);
-             }
-             
-            /* Serial number from batch_id + lot_id (unique per chip) */
-            /* Note: 7 bytes = 14 hex chars + null terminator = 15 bytes, fits in 16-byte field */
-            snprintf((char*)pInfo->serialNumber, 16, "%02X%02X%02X%02X%02X%02X%02X",
-                chip_id.batch_id[0], chip_id.batch_id[1], chip_id.batch_id[2],
-                chip_id.batch_id[3], chip_id.batch_id[4],
-                chip_id.ser_num.lot_id[0], chip_id.ser_num.lot_id[1]);
-             
-             /* Label: Model + last 4 hex chars of serial for uniqueness */
-             /* e.g., "TR01-C2P-T101-048D" */
-             if (pInfo->model[0] != '\0') {
-                 snprintf((char*)pInfo->label, 32, "%s-%02X%02X",
-                     pInfo->model,
-                     chip_id.ser_num.lot_id[1], chip_id.ser_num.lot_id[2]);
-             } else {
-                 strncpy((char*)pInfo->label, "TROPIC01", 32);
-             }
-         } else {
-             /* Fallback if chip_id read fails */
-             strncpy((char*)pInfo->label, "TROPIC01", 32);
-             strncpy((char*)pInfo->model, "TROPIC01", 16);
-             strncpy((char*)pInfo->serialNumber, "0000000000000000", 16);
-         }
-     } else {
-         /* Fallback if not initialized */
-         strncpy((char*)pInfo->label, "TROPIC01", 32);
-         strncpy((char*)pInfo->model, "TROPIC01", 16);
-         strncpy((char*)pInfo->serialNumber, "0000000000000000", 16);
-     }
-     
-     LT_PKCS11_LOG(">>> C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
-         pInfo->label, pInfo->model, pInfo->serialNumber,
-         pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
-         pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
+CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
+    LT_PKCS11_LOG(">>> C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG(">>> Library not initialized - returning CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* We only support slot ID 1 */
+    if (slotID != 1) { 
+        LT_PKCS11_LOG(">>> Invalid slotID=%lu - returning CKR_SLOT_ID_INVALID", slotID);
+        return CKR_SLOT_ID_INVALID;
+    }
+    
+    /* pInfo is required */
+    if (!pInfo) {
+        LT_PKCS11_LOG(">>> pInfo is NULL - returning CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Get chip ID to verify token is present and get token info */
+    struct lt_chip_id_t chip_id = {0};
+    lt_ret_t ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG(">>> Failed to read chip ID: %s - returning CKR_TOKEN_NOT_PRESENT", lt_ret_verbose(ret));
+        return CKR_TOKEN_NOT_PRESENT;
+    }
+    
+    /* Fill in token information */
+    memset(pInfo, 0, sizeof(CK_TOKEN_INFO));
+    
+    /* Manufacturer is always TropicSquare */
+    strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
+    
+    /* Token capabilities */
+    pInfo->flags = CKF_RNG;  /* This token has a hardware RNG! */
+    
+    /* Session limits */
+    pInfo->ulMaxSessionCount = 1;      /* We support only one session at a time */
+    pInfo->ulSessionCount = pkcs11_ctx.session_open ? 1 : 0;
+    pInfo->ulMaxRwSessionCount = 1;
+    pInfo->ulRwSessionCount = pkcs11_ctx.session_open ? 1 : 0;
+    
+    /* PIN is not used - we use pairing keys instead */
+    pInfo->ulMaxPinLen = 0;
+    pInfo->ulMinPinLen = 0;
+    
+    /* Memory info - we report unknown */
+    pInfo->ulTotalPublicMemory = CK_UNAVAILABLE_INFORMATION;
+    pInfo->ulFreePublicMemory = CK_UNAVAILABLE_INFORMATION;
+    pInfo->ulTotalPrivateMemory = CK_UNAVAILABLE_INFORMATION;
+    pInfo->ulFreePrivateMemory = CK_UNAVAILABLE_INFORMATION;
+    
+    /* Get firmware version */
+    uint8_t fw_ver[4] = {0};
+    ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
+    if (ret == LT_OK) {
+        pInfo->firmwareVersion.major = fw_ver[3];
+        pInfo->firmwareVersion.minor = fw_ver[2];
+    }
+    
+    /* Hardware version from chip_id_ver array [major.minor.patch.build] */
+    pInfo->hardwareVersion.major = chip_id.chip_id_ver[0];
+    pInfo->hardwareVersion.minor = chip_id.chip_id_ver[1];
+    
+    /* Model from part_num_data (ASCII string with length prefix) */
+    /* part_num_data contains something like "TR01-C2P-T101" prefixed with length byte */
+    if (chip_id.part_num_data[0] > 0 && chip_id.part_num_data[0] < 16) {
+        uint8_t model_len = chip_id.part_num_data[0];
+        if (model_len > 15) model_len = 15;
+        memcpy(pInfo->model, &chip_id.part_num_data[1], model_len);
+        pInfo->model[model_len] = '\0';
+    } else {
+        strncpy((char*)pInfo->model, "TROPIC01", 16);
+    }
+    
+    /* Serial number from batch_id + lot_id (unique per chip) */
+    /* Note: 7 bytes = 14 hex chars + null terminator = 15 bytes, fits in 16-byte field */
+    snprintf((char*)pInfo->serialNumber, 16, "%02X%02X%02X%02X%02X%02X%02X",
+        chip_id.batch_id[0], chip_id.batch_id[1], chip_id.batch_id[2],
+        chip_id.batch_id[3], chip_id.batch_id[4],
+        chip_id.ser_num.lot_id[0], chip_id.ser_num.lot_id[1]);
+    
+    /* Label: Model + last 4 hex chars of serial for uniqueness */
+    /* e.g., "TR01-C2P-T101-048D" */
+    if (pInfo->model[0] != '\0') {
+        snprintf((char*)pInfo->label, 32, "%s-%02X%02X",
+            pInfo->model,
+            chip_id.ser_num.lot_id[1], chip_id.ser_num.lot_id[2]);
+    } else {
+        strncpy((char*)pInfo->label, "TROPIC01", 32);
+    }
+    
+    LT_PKCS11_LOG(">>> C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
+        pInfo->label, pInfo->model, pInfo->serialNumber,
+        pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
+        pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
      return CKR_OK;
  }
  
