@@ -1,6 +1,9 @@
 /**
  * @file pkcs11.c
- * @brief PKCS#11 Module for TROPIC01 Secure Element - Hardware Random Number Generator
+ * @brief PKCS#11 Module for TROPIC01 Secure Element
+ * @copyright Copyright (c) 2020-2025 Tropic Square s.r.o.
+ *
+ * @license For the license see file LICENSE.md file in the root directory of this source tree.
  **/
 
  #include "pkcs11.h"           /* PKCS#11 type definitions (CK_RV, CK_INFO, etc.) */

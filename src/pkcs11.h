@@ -1,7 +1,10 @@
 /**
  * @file pkcs11.h
- * @brief PKCS#11 (Cryptoki) Type Definitions and Function Declarations
- * 
+ * @brief PKCS#11 Module for TROPIC01 Secure Element
+ * @copyright Copyright (c) 2020-2025 Tropic Square s.r.o.
+ *
+ * @license For the license see file LICENSE.md file in the root directory of this source tree.
+ *
  * ============================================================================
  * WHAT IS PKCS#11?
  * ============================================================================
