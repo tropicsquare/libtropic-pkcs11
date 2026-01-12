@@ -788,10 +788,10 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 case CKA_VALUE:
                     /* For public keys, return the public key value */
-                    /* For private keys, this is sensitive - return error */
+                    /* For private keys, this is sensitive - return CKR_ATTRIBUTE_SENSITIVE per PKCS#11 spec */
                     if (is_private) {
                         pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_ATTRIBUTE_TYPE_INVALID;  /* Sensitive attribute */
+                        rv = CKR_ATTRIBUTE_SENSITIVE;  /* Private key value cannot be extracted */
                     } else {
                         if (pTemplate[i].pValue == NULL) {
                             pTemplate[i].ulValueLen = pubkey_len;
@@ -1243,13 +1243,15 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
          return CKR_SESSION_HANDLE_INVALID;
      }
      
+     /* Per PKCS#11 spec: requesting 0 bytes is valid and should just succeed */
+     if (ulRandomLen == 0) {
+         LT_PKCS11_LOG("ulRandomLen is 0: CKR_OK (valid no-op per spec)");
+         return CKR_OK;
+     }
+     
      /* Validate output buffer */
      if (!pRandomData) {
          LT_PKCS11_LOG("pRandomData is NULL: CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     if (ulRandomLen == 0) {
-         LT_PKCS11_LOG("ulRandomLen is 0: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
      
@@ -1310,19 +1312,31 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
      LT_PKCS11_LOG("C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
          hSession, pSeed, ulSeedLen);
      
+     /* Library must be initialized */
+     if (!pkcs11_ctx.initialized) {
+         LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+         return CKR_CRYPTOKI_NOT_INITIALIZED;
+     }
+     
+     /* Session must be open */
+     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+         LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
+         return CKR_SESSION_HANDLE_INVALID;
+     }
+     
      /* Validate parameters */
      if (!pSeed) {
          LT_PKCS11_LOG("pSeed is NULL: CKR_ARGUMENTS_BAD");
          return CKR_ARGUMENTS_BAD;
      }
-     if (ulSeedLen == 0) {
-         LT_PKCS11_LOG("ulSeedLen is 0: CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
      
-     /* Accept the seed but do nothing - HWRNG doesn't need external seeding */
-     LT_PKCS11_LOG("C_SeedRandom OK (seeded with %lu bytes)", ulSeedLen);
-     return CKR_FUNCTION_NOT_SUPPORTED;
+     /* 
+      * Per PKCS#11 spec: TROPIC01 has a true hardware RNG that uses physical
+      * entropy sources (thermal noise). It does not use or need external seeding.
+      * Return CKR_RANDOM_SEED_NOT_SUPPORTED to indicate this.
+      */
+     LT_PKCS11_LOG("C_SeedRandom: HWRNG does not use seed: CKR_RANDOM_SEED_NOT_SUPPORTED");
+     return CKR_RANDOM_SEED_NOT_SUPPORTED;
 }
 
 
@@ -1617,18 +1631,35 @@ CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
     LT_PKCS11_LOG("C_Login (hSession=0x%lx, userType=%lu, pPin=%p, ulPinLen=%lu)",
         hSession, userType, pPin, ulPinLen);
     
-    /* TROPIC01 authentication is handled at session start via pairing keys.
-     * We don't use PIN-based login, so just return OK. */
-    
+    /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
         return CKR_CRYPTOKI_NOT_INITIALIZED;
     }
     
+    /* Session must be open */
     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
         return CKR_SESSION_HANDLE_INVALID;
     }
     
-    /* Accept any login - real auth is via pairing keys */
+    /* Validate user type per PKCS#11 spec */
+    if (userType != CKU_USER && userType != CKU_SO && userType != CKU_CONTEXT_SPECIFIC) {
+        LT_PKCS11_LOG("Invalid user type %lu: CKR_ARGUMENTS_BAD", userType);
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Per PKCS#11 spec: if ulPinLen > 0, pPin must not be NULL */
+    if (ulPinLen > 0 && pPin == NULL) {
+        LT_PKCS11_LOG("pPin is NULL but ulPinLen > 0: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* 
+     * TROPIC01 authentication is handled at session start via pairing keys.
+     * We don't use PIN-based login - the secure session establishment already
+     * authenticated the host. Accept the login as a no-op.
+     */
     LT_PKCS11_LOG("C_Login OK (no-op, auth via pairing keys)");
     return CKR_OK;
 }
@@ -1948,7 +1979,7 @@ CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
          /* =====================================================================
           * RANDOM NUMBER GENERATION - OUR MAIN FEATURE!
           * ===================================================================== */
-         .C_SeedRandom = NULL,                   /* Seed the RNG (no-op for HWRNG) - Not implemented */
+         .C_SeedRandom = C_SeedRandom,           /* Returns CKR_RANDOM_SEED_NOT_SUPPORTED (HWRNG) */
          .C_GenerateRandom = C_GenerateRandom,   /* *** GENERATE RANDOM BYTES FROM TROPIC01 *** */
          
          /* =====================================================================

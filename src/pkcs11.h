@@ -238,6 +238,9 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKR_BUFFER_TOO_SMALL                    0x00000150  /**< Output buffer too small */
 #define CKR_CRYPTOKI_NOT_INITIALIZED            0x00000190  /**< C_Initialize not called */
 #define CKR_CRYPTOKI_ALREADY_INITIALIZED        0x00000191  /**< C_Initialize called twice */
+#define CKR_RANDOM_SEED_NOT_SUPPORTED           0x00000120  /**< Token RNG doesn't use seed */
+#define CKR_RANDOM_NO_RNG                       0x00000121  /**< Token has no RNG */
+#define CKR_ATTRIBUTE_SENSITIVE                 0x00000011  /**< Sensitive attribute can't be read */
 #define CKR_VENDOR_DEFINED                      0x80000000  /**< Start of vendor-defined errors */
 
 /* Special value indicating information is not available */
