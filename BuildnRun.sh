@@ -40,31 +40,26 @@ pkcs11-tool --module "$MODULE" --list-objects 2>&1 || true
 # ============================================================
 section "R-MEM Data Objects - Multiple Slots"
 
-# Test data for different slot sizes
-DATA_SMALL="Hello"                                    # 5 bytes
-DATA_MEDIUM="This is a test message for TROPIC01!"   # 38 bytes
-DATA_LARGE=$(head -c 200 /dev/urandom | base64)      # ~270 bytes
-
-# Slots to test
-RMEM_SLOTS=(0 5 10 50 100 127)
+# Use high slot numbers that are unlikely to be occupied
+RMEM_SLOTS=(60 61 62 63 64 65)
 
 for SLOT in "${RMEM_SLOTS[@]}"; do
     echo -e "\n--- R-MEM Slot $SLOT ---"
     
-    # Clear slot first
-    pkcs11-tool --module "$MODULE" --delete-object --type data --label "R-MEM Slot $SLOT" 2>/dev/null || true
+    # Clear slot first (use consistent label format)
+    pkcs11-tool --module "$MODULE" --delete-object --type data --label "r-mem-slot:$SLOT" 2>/dev/null || true
     
     # Write data
     echo -n "Data for slot $SLOT - timestamp $(date +%s)" > /tmp/data_$SLOT.bin
-    if pkcs11-tool --module "$MODULE" --write-object /tmp/data_$SLOT.bin --type data --label "slot:$SLOT" 2>&1; then
+    if pkcs11-tool --module "$MODULE" --write-object /tmp/data_$SLOT.bin --type data --label "r-mem-slot:$SLOT" 2>&1; then
         test_pass "Write to slot $SLOT"
     else
         test_fail "Write to slot $SLOT"
         continue
     fi
     
-    # Read back
-    if pkcs11-tool --module "$MODULE" --read-object --type data --label "R-MEM Slot $SLOT" -o /tmp/read_$SLOT.bin 2>&1; then
+    # Read back (use consistent label format)
+    if pkcs11-tool --module "$MODULE" --read-object --type data --label "r-mem-slot:$SLOT" -o /tmp/read_$SLOT.bin 2>&1; then
         if diff /tmp/data_$SLOT.bin /tmp/read_$SLOT.bin > /dev/null; then
             test_pass "Read/verify slot $SLOT"
         else
@@ -77,27 +72,29 @@ done
 
 section "R-MEM Edge Cases"
 
-# Test minimum data size (1 byte)
+# Test minimum data size (1 byte) - use empty slot
+EDGE_SLOT1=70
+pkcs11-tool --module "$MODULE" --delete-object --type data --label "r-mem-slot:$EDGE_SLOT1" 2>/dev/null || true
 echo -n "X" > /tmp/min_data.bin
-pkcs11-tool --module "$MODULE" --delete-object --type data --label "R-MEM Slot 1" 2>/dev/null || true
-if pkcs11-tool --module "$MODULE" --write-object /tmp/min_data.bin --type data --label "slot:1" 2>&1; then
+if pkcs11-tool --module "$MODULE" --write-object /tmp/min_data.bin --type data --label "r-mem-slot:$EDGE_SLOT1" 2>&1; then
     test_pass "Minimum data size (1 byte)"
 else
     test_fail "Minimum data size"
 fi
 
-# Test larger data (444 bytes max for R-MEM)
+# Test larger data (444 bytes max for R-MEM) - use empty slot
+EDGE_SLOT2=71
+pkcs11-tool --module "$MODULE" --delete-object --type data --label "r-mem-slot:$EDGE_SLOT2" 2>/dev/null || true
 head -c 400 /dev/urandom > /tmp/large_data.bin
-pkcs11-tool --module "$MODULE" --delete-object --type data --label "R-MEM Slot 2" 2>/dev/null || true
-if pkcs11-tool --module "$MODULE" --write-object /tmp/large_data.bin --type data --label "slot:2" 2>&1; then
+if pkcs11-tool --module "$MODULE" --write-object /tmp/large_data.bin --type data --label "r-mem-slot:$EDGE_SLOT2" 2>&1; then
     test_pass "Large data (400 bytes)"
 else
     test_fail "Large data write"
 fi
 
 section "R-MEM Cleanup"
-for SLOT in "${RMEM_SLOTS[@]}" 1 2; do
-    pkcs11-tool --module "$MODULE" --delete-object --type data --label "R-MEM Slot $SLOT" 2>/dev/null || true
+for SLOT in "${RMEM_SLOTS[@]}" $EDGE_SLOT1 $EDGE_SLOT2; do
+    pkcs11-tool --module "$MODULE" --delete-object --type data --label "r-mem-slot:$SLOT" 2>/dev/null || true
 done
 echo "Cleaned up test data"
 
@@ -106,15 +103,15 @@ echo "Cleaned up test data"
 # ============================================================
 section "ECC Key Generation - Multiple Slots"
 
-# ECC slots to test (0-31 available, but keys persist so be careful)
-ECC_SLOTS=(2 3 4 5)  # Use slots 2-5 to avoid conflicts with existing keys
+# ECC slots to test - use high slots to avoid conflicts
+ECC_SLOTS=(24 25 26 27)
 
 for SLOT in "${ECC_SLOTS[@]}"; do
     echo -e "\n--- ECC Slot $SLOT ---"
     SLOT_HEX=$(printf "%02x" $SLOT)
     
     if pkcs11-tool --module "$MODULE" --keypairgen --key-type EC:secp256r1 --id $SLOT_HEX --label "test-key-$SLOT" 2>&1; then
-        test_pass "Generate key in slot $SLOT"
+        test_pass "Generate P256 key in slot $SLOT"
     else
         echo "(Slot $SLOT may already have a key - skipping)"
     fi
@@ -127,24 +124,26 @@ echo ""
 echo "Public keys:"
 pkcs11-tool --module "$MODULE" --list-objects --type pubkey 2>&1 || echo "(none)"
 
-section "ECC Signing Tests"
+section "ECC Signing Tests - P256 (ECDSA)"
 
-# Find a working key and sign
-SIGN_DATA=$(echo -n "0123456789ABCDEF0123456789ABCDEF")  # 32 bytes (SHA-256 hash size)
+# Sign data for ECDSA (32 bytes for SHA-256 hash)
+SIGN_DATA="0123456789ABCDEF0123456789ABCDEF"
 echo -n "$SIGN_DATA" > /tmp/hash.bin
 
-# Try signing with different keys
+# P256 keys use ECDSA - test slots 2, 3, 4 (known P256 keys)
+P256_SLOTS=(2 3 4)
 SIGN_SUCCESS=0
-for SLOT in 0 1 "${ECC_SLOTS[@]}"; do
+
+for SLOT in "${P256_SLOTS[@]}"; do
     SLOT_HEX=$(printf "%02x" $SLOT)
-    echo -e "\n--- Sign with key $SLOT ---"
+    echo -e "\n--- ECDSA Sign with P256 key $SLOT ---"
     
     if pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
         --id $SLOT_HEX --input-file /tmp/hash.bin --output-file /tmp/sig_$SLOT.bin 2>&1; then
         
         SIG_SIZE=$(wc -c < /tmp/sig_$SLOT.bin)
         if [ "$SIG_SIZE" -eq 64 ]; then
-            test_pass "Sign with key $SLOT (64 bytes)"
+            test_pass "ECDSA sign with P256 key $SLOT (64 bytes)"
             SIGN_SUCCESS=1
             
             # Export public key
@@ -157,22 +156,61 @@ for SLOT in 0 1 "${ECC_SLOTS[@]}"; do
             test_fail "Signature size wrong: $SIG_SIZE bytes"
         fi
     else
-        echo "(Key $SLOT not available or signing failed)"
+        echo "(P256 Key $SLOT not available or signing failed)"
     fi
 done
 
 if [ $SIGN_SUCCESS -eq 0 ]; then
-    test_fail "No working signing key found"
+    test_fail "No working P256 signing key found"
+fi
+
+section "ECC Signing Tests - Ed25519 (EdDSA)"
+
+# Ed25519 keys use EdDSA - test slots 0, 1 (known Ed25519 keys)
+ED25519_SLOTS=(0 1)
+EDDSA_SUCCESS=0
+
+for SLOT in "${ED25519_SLOTS[@]}"; do
+    SLOT_HEX=$(printf "%02x" $SLOT)
+    echo -e "\n--- EdDSA Sign with Ed25519 key $SLOT ---"
+    
+    if pkcs11-tool --module "$MODULE" --sign --mechanism EDDSA \
+        --id $SLOT_HEX --input-file /tmp/hash.bin --output-file /tmp/sig_ed_$SLOT.bin 2>&1; then
+        
+        SIG_SIZE=$(wc -c < /tmp/sig_ed_$SLOT.bin)
+        if [ "$SIG_SIZE" -eq 64 ]; then
+            test_pass "EdDSA sign with Ed25519 key $SLOT (64 bytes)"
+            EDDSA_SUCCESS=1
+            
+            # Export public key
+            if pkcs11-tool --module "$MODULE" --read-object --type pubkey --id $SLOT_HEX -o /tmp/pub_ed_$SLOT.der 2>&1; then
+                test_pass "Export Ed25519 pubkey $SLOT"
+                echo "Signature:"
+                xxd /tmp/sig_ed_$SLOT.bin | head -2
+            fi
+        else
+            test_fail "EdDSA signature size wrong: $SIG_SIZE bytes"
+        fi
+    else
+        echo "(Ed25519 Key $SLOT not available or signing failed)"
+    fi
+done
+
+if [ $EDDSA_SUCCESS -eq 0 ]; then
+    test_fail "No working Ed25519 signing key found"
 fi
 
 section "Multiple Signatures Comparison"
-# Sign same data twice with same key - signatures should differ (ECDSA is randomized)
-if [ -f /tmp/sig_0.bin ]; then
-    pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
-        --id 00 --input-file /tmp/hash.bin --output-file /tmp/sig_0_v2.bin 2>&1 || true
+# Sign same data twice with same key - ECDSA signatures should differ (randomized k)
+SLOT_HEX="02"  # P256 key
+if pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
+    --id $SLOT_HEX --input-file /tmp/hash.bin --output-file /tmp/sig_2_v1.bin 2>&1; then
     
-    if [ -f /tmp/sig_0_v2.bin ]; then
-        if ! cmp -s /tmp/sig_0.bin /tmp/sig_0_v2.bin; then
+    pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
+        --id $SLOT_HEX --input-file /tmp/hash.bin --output-file /tmp/sig_2_v2.bin 2>&1 || true
+    
+    if [ -f /tmp/sig_2_v2.bin ]; then
+        if ! cmp -s /tmp/sig_2_v1.bin /tmp/sig_2_v2.bin; then
             test_pass "ECDSA signatures differ (randomized k)"
         else
             test_fail "ECDSA signatures identical (should differ)"
@@ -186,7 +224,7 @@ fi
 section "Error Handling"
 
 # Try to read non-existent object
-if pkcs11-tool --module "$MODULE" --read-object --type data --label "R-MEM Slot 999" -o /tmp/nonexist.bin 2>&1; then
+if pkcs11-tool --module "$MODULE" --read-object --type data --label "r-mem-slot:999" -o /tmp/nonexist.bin 2>&1; then
     test_fail "Should fail on non-existent slot"
 else
     test_pass "Correctly rejects non-existent slot"
@@ -198,6 +236,14 @@ if pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
     test_fail "Should fail on non-existent key"
 else
     test_pass "Correctly rejects non-existent key"
+fi
+
+# Test wrong mechanism for key type (ECDSA with Ed25519 should fail)
+if pkcs11-tool --module "$MODULE" --sign --mechanism ECDSA \
+    --id 00 --input-file /tmp/hash.bin --output-file /tmp/bad_mech.bin 2>&1; then
+    test_fail "Should fail ECDSA with Ed25519 key"
+else
+    test_pass "Correctly rejects ECDSA with Ed25519 key"
 fi
 
 # ============================================================
