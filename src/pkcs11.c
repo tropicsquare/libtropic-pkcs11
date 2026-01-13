@@ -1120,9 +1120,20 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     *pulObjectCount = 0;
     CK_OBJECT_CLASS find_class = pkcs11_ctx.find_class;
     
-    /* Search for CKO_DATA objects in R-MEM (if class filter matches or no filter) */
+    /* Decide which backends to search based on class filter */
+    CK_BBOOL search_rmem;
+    CK_BBOOL search_ecc;
+    if (find_class == 0) {
+        /* No class filter: search both (legacy behaviour) */
+        search_rmem = CK_TRUE;
+        search_ecc = CK_TRUE;
+    } else {
+        /* With class filter: be strict to avoid needless scans */
+        search_rmem = (find_class == CKO_DATA);
+        search_ecc = (find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY);
+    }
+    
     /* Skip R-MEM search if ID filter is set but it's NOT an R-MEM ID format */
-    CK_BBOOL search_rmem = (find_class == 0 || find_class == CKO_DATA);
     if (pkcs11_ctx.find_id_set && !pkcs11_ctx.find_id_is_rmem) {
         /* ID filter is set but it's an ECC-style ID (not 0x80XX), skip R-MEM */
         search_rmem = CK_FALSE;
@@ -1164,9 +1175,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         }
     }
     
-    /* Search for ECC keys (if class filter matches or no filter) */
     /* Skip ECC search if ID filter is an R-MEM ID format (0x80XX) */
-    CK_BBOOL search_ecc = (find_class == 0 || find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY);
     if (pkcs11_ctx.find_id_is_rmem) {
         /* ID filter is R-MEM format (0x80XX), skip ECC */
         search_ecc = CK_FALSE;
