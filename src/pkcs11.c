@@ -508,26 +508,10 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
     
-    /* If no slot specified, find first empty slot */
+    /* Slot must be specified explicitly */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-        uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
-        uint16_t read_size;
-        CK_BBOOL found = CK_FALSE;
-        
-        for (uint16_t i = 0; i <= TR01_R_MEM_DATA_SLOT_MAX; i++) {
-            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, i, temp_buf, sizeof(temp_buf), &read_size);
-            if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
-                slot_id = i;
-                found = CK_TRUE;
-                LT_PKCS11_LOG("Found empty slot %lu", slot_id);
-                break;
-            }
-        }
-        
-        if (!found) {
-            LT_PKCS11_LOG("No empty r-mem-slots available: CKR_DEVICE_MEMORY");
-            return CKR_DEVICE_MEMORY;
-        }
+        LT_PKCS11_LOG("Slot not specified (CKA_ID or label): CKR_TEMPLATE_INCOMPLETE");
+        return CKR_TEMPLATE_INCOMPLETE;
     }
     
     /* Validate slot ID */
@@ -1847,27 +1831,10 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
         }
     }
     
-    /* If no slot specified, find first empty slot */
+    /* Slot must be specified explicitly */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
-        lt_ecc_curve_type_t existing_curve;
-        lt_ecc_key_origin_t origin;
-        
-        for (uint8_t i = 0; i <= TR01_ECC_SLOT_31; i++) {
-            lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)i,
-                                           pubkey_buf, sizeof(pubkey_buf), &existing_curve, &origin);
-            if (ret == LT_L3_ECC_INVALID_KEY) {
-                /* Found empty slot */
-                slot_id = i;
-                LT_PKCS11_LOG("  Auto-selected empty ECC slot: %lu", slot_id);
-                break;
-            }
-        }
-        
-        if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-            LT_PKCS11_LOG("No empty ECC slots available: CKR_DEVICE_MEMORY");
-            return CKR_DEVICE_MEMORY;
-        }
+        LT_PKCS11_LOG("Slot ID not specified (CKA_ID required): CKR_TEMPLATE_INCOMPLETE");
+        return CKR_TEMPLATE_INCOMPLETE;
     }
     
     /* Validate slot range */
