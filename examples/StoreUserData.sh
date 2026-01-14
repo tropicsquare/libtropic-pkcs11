@@ -15,13 +15,13 @@ if [ ! -f "$DATA_FILE" ]; then
 fi
 
 echo "Erasing $LABEL"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --delete-object --type data --label "$LABEL" 2>/dev/null || true
+pkcs11-tool --module "$MODULE" --delete-object --type data --label "$LABEL" 2>/dev/null || true
 
 echo "Writing $LABEL from $DATA_FILE"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --write-object "$DATA_FILE" --type data --label "$LABEL"
+pkcs11-tool --module "$MODULE" --write-object "$DATA_FILE" --type data --label "$LABEL"
 
 echo "Reading back $LABEL to $READ_FILE"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --read-object --type data --label "$LABEL" -o "$READ_FILE"
+pkcs11-tool --module "$MODULE" --read-object --type data --label "$LABEL" -o "$READ_FILE"
 
 echo "Diff result:"
 if diff "$DATA_FILE" "$READ_FILE" > /dev/null; then
