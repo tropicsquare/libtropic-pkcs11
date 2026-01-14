@@ -13,4 +13,4 @@ SLOT="${SLOT:-24}"
 SLOT_HEX=$(printf "%02x" "$SLOT")
 
 echo "Erasing ECC key in slot $SLOT (id $SLOT_HEX)"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --delete-object --type privkey --id "$SLOT_HEX"
+pkcs11-tool --module "$MODULE" --delete-object --type privkey --id "$SLOT_HEX"

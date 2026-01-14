@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODULE="$ROOT_DIR/build/liblibtropic_pkcs11.so"
 
 # PIN handling (default empty)
-PIN="${PIN:-""}"
+PIN="1234"
 PIN_ARGS=(--pin "$PIN")
 LOGIN_ARGS=(--login --pin "$PIN")
 

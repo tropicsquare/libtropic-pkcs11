@@ -551,24 +551,38 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject) {
         return CKR_SESSION_HANDLE_INVALID;
     }
     
-    /* Validate object handle */
-    if (!PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
-        LT_PKCS11_LOG("Invalid object handle: CKR_OBJECT_HANDLE_INVALID");
-        return CKR_OBJECT_HANDLE_INVALID;
-    }
-    
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
+    lt_ret_t ret;
     
-    /* Erase R-MEM slot */
-    LT_PKCS11_LOG("Erasing r-mem-slot:%u", slot);
-    lt_ret_t ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
-    if (ret != LT_OK) {
-        LT_PKCS11_LOG("Failed to erase R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
-        return CKR_DEVICE_ERROR;
+    /* Handle R-MEM data objects */
+    if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+        /* Erase R-MEM slot */
+        LT_PKCS11_LOG("Erasing r-mem-slot:%u", slot);
+        ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("Failed to erase R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            return CKR_DEVICE_ERROR;
+        }
+        LT_PKCS11_LOG("C_DestroyObject OK");
+        return CKR_OK;
     }
     
-    LT_PKCS11_LOG("C_DestroyObject OK");
-    return CKR_OK;
+    /* Handle ECC private or public keys */
+    if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) || PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
+        /* Erase ECC key (both private and public keys are in the same slot) */
+        LT_PKCS11_LOG("Erasing ECC key in slot:%u", slot);
+        ret = lt_ecc_key_erase(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot);
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("Failed to erase ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            return CKR_DEVICE_ERROR;
+        }
+        LT_PKCS11_LOG("C_DestroyObject OK");
+        return CKR_OK;
+    }
+    
+    /* Invalid object handle */
+    LT_PKCS11_LOG("Invalid object handle: CKR_OBJECT_HANDLE_INVALID");
+    return CKR_OBJECT_HANDLE_INVALID;
 }
 
 CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,

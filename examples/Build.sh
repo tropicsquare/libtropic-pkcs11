@@ -8,5 +8,5 @@ cd "$ROOT_DIR"
 rm -rf build
 mkdir build
 cd build
-cmake -DTS_USB_DEV="/dev/ttyACM0" -DLT_PKCS11_LOG_EN=OFF ..
+cmake -DTS_USB_DEV="/dev/ttyACM0" -DLT_PKCS11_LOG_EN=ON ..
 make

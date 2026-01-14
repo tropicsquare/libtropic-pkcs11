@@ -7,5 +7,5 @@ require_module
 
 OUT="${OUT:-/tmp/rnd.bin}"
 
-pkcs11-tool --module "$MODULE" "${PIN_ARGS[@]}" --generate-random 32 -o "$OUT"
+pkcs11-tool --module "$MODULE" --generate-random 32 -o "$OUT"
 xxd "$OUT"
