@@ -6,17 +6,17 @@
 #
 # Mechanism:
 #   1. Calls C_DestroyObject via pkcs11-tool --delete-object
-#   2. Finds the private key by CKA_ID (slot number in hex)
+#   2. Finds the private key by CKA_LABEL (slot number)
 #   3. TROPIC01 securely erases the key pair from the ECC slot
 #   4. Both private and public keys are removed (same slot)
 
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
-
 require_module
 
 SLOT="${SLOT:-24}"
-SLOT_HEX=$(printf "%02x" "$SLOT")
 
-echo "Erasing ECC key in slot $SLOT (id $SLOT_HEX)"
-pkcs11-tool --module "$MODULE" --delete-object --type privkey --id "$SLOT_HEX"
+echo "Erasing ECC key in slot $SLOT"
+pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --delete-object --type privkey --label "$SLOT"

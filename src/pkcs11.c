@@ -64,7 +64,7 @@ typedef struct {
     uint16_t find_rmem_index;
     uint8_t find_ecc_index;
     CK_BBOOL find_ecc_done;
-    CK_BBOOL find_id_set;           /* True if filtering by CKA_ID */
+    CK_BBOOL find_id_set;           /* True if filtering by slot (via CKA_LABEL) */
     CK_ULONG find_id;               /* The ID value to filter by (slot number) */
 
     /* C_Sign state */
@@ -440,19 +440,8 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
                 data_len = pTemplate[i].ulValueLen;
                 LT_PKCS11_LOG("  CKA_VALUE = %lu bytes", data_len);
                 break;
-            case CKA_ID:
-                /* Use CKA_ID as the slot number (for ECC-style access) */
-                if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-                    uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-                    slot_id = 0;
-                    for (CK_ULONG j = 0; j < pTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
-                        slot_id = (slot_id << 8) | id_bytes[j];
-                    }
-                    LT_PKCS11_LOG("  CKA_ID = %lu (slot)", slot_id);
-                }
-                break;
             case CKA_LABEL:
-                /* Use CKA_LABEL as slot number (pkcs11-tool uses --label for data objects) */
+                /* Use CKA_LABEL as slot number */
                 if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
                     char temp[16] = {0};
                     CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
@@ -487,9 +476,9 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
     
-    /* Slot must be specified via CKA_ID */
+    /* Slot must be specified via CKA_LABEL */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-        LT_PKCS11_LOG("Slot not specified (use --id): CKR_TEMPLATE_INCOMPLETE");
+        LT_PKCS11_LOG("Slot not specified (use --label): CKR_TEMPLATE_INCOMPLETE");
         return CKR_TEMPLATE_INCOMPLETE;
     }
     
@@ -1018,32 +1007,23 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
         return CKR_OPERATION_ACTIVE;
     }
     
-    /* Parse template to find object class and ID/label filters */
+    /* Parse template to find object class and label filter */
     CK_OBJECT_CLASS find_class = 0;
-    CK_BBOOL find_id_set = CK_FALSE;
-    CK_ULONG find_id = 0;
+    CK_BBOOL find_slot_set = CK_FALSE;
+    CK_ULONG find_slot = 0;
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
         if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
-        } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_ID as big-endian bytes to get the slot number */
-            uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-            find_id = 0;
-            for (CK_ULONG j = 0; j < pTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
-                find_id = (find_id << 8) | id_bytes[j];
-            }
-            find_id_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_ID = %lu (slot)", find_id);
         } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_LABEL as slot number (pkcs11-tool uses --label for data objects) */
+            /* Parse CKA_LABEL as slot number */
             char temp[16] = {0};
             CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
             memcpy(temp, pTemplate[i].pValue, copy_len);
-            find_id = (CK_ULONG)atoi(temp);
-            find_id_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_id);
+            find_slot = (CK_ULONG)atoi(temp);
+            find_slot_set = CK_TRUE;
+            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_slot);
         }
     }
     
@@ -1053,11 +1033,11 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
-    pkcs11_ctx.find_id_set = find_id_set;
-    pkcs11_ctx.find_id = find_id;
+    pkcs11_ctx.find_id_set = find_slot_set;
+    pkcs11_ctx.find_id = find_slot;
     
-    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, id_set=%d, id=%lu)", 
-        find_class, find_id_set, find_id);
+    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, slot_set=%d, slot=%lu)", 
+        find_class, find_slot_set, find_slot);
     return CKR_OK;
 }
 
@@ -1739,11 +1719,11 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
         return CKR_MECHANISM_INVALID;
     }
     
-    /* Parse templates to find curve (EC_PARAMS) and slot (ID) */
+    /* Parse templates to find curve (EC_PARAMS) and slot (LABEL) */
     lt_ecc_curve_type_t curve = TR01_CURVE_P256;  /* Default to P-256 */
     CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
-    
-    /* Check public key template for EC_PARAMS (curve) and ID (slot) */
+
+    /* Check public key template for EC_PARAMS (curve) and LABEL (slot) */
     for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++) {
         if (pPublicKeyTemplate[i].type == CKA_EC_PARAMS && pPublicKeyTemplate[i].pValue) {
             /* Check if it's secp256r1 or Ed25519 */
@@ -1759,38 +1739,36 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
                 LT_PKCS11_LOG("Unsupported curve OID: CKR_ATTRIBUTE_VALUE_INVALID");
                 return CKR_ATTRIBUTE_VALUE_INVALID;
             }
-        } else if (pPublicKeyTemplate[i].type == CKA_ID && pPublicKeyTemplate[i].pValue) {
-            /* Parse ID as slot number */
+        } else if (pPublicKeyTemplate[i].type == CKA_LABEL && pPublicKeyTemplate[i].pValue) {
+            /* Parse LABEL as slot number */
             if (pPublicKeyTemplate[i].ulValueLen > 0) {
-                uint8_t *id_bytes = (uint8_t*)pPublicKeyTemplate[i].pValue;
-                slot_id = 0;
-                for (CK_ULONG j = 0; j < pPublicKeyTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
-                    slot_id = (slot_id << 8) | id_bytes[j];
-                }
-                LT_PKCS11_LOG("  Slot ID from public template: %lu", slot_id);
+                char temp[16] = {0};
+                CK_ULONG copy_len = (pPublicKeyTemplate[i].ulValueLen < 15) ? pPublicKeyTemplate[i].ulValueLen : 15;
+                memcpy(temp, pPublicKeyTemplate[i].pValue, copy_len);
+                slot_id = (CK_ULONG)atoi(temp);
+                LT_PKCS11_LOG("  Slot from public template: %lu", slot_id);
             }
         }
     }
-    
-    /* Also check private key template for ID */
+
+    /* Also check private key template for LABEL */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
         for (CK_ULONG i = 0; i < ulPrivateKeyAttributeCount; i++) {
-            if (pPrivateKeyTemplate[i].type == CKA_ID && pPrivateKeyTemplate[i].pValue) {
+            if (pPrivateKeyTemplate[i].type == CKA_LABEL && pPrivateKeyTemplate[i].pValue) {
                 if (pPrivateKeyTemplate[i].ulValueLen > 0) {
-                    uint8_t *id_bytes = (uint8_t*)pPrivateKeyTemplate[i].pValue;
-                    slot_id = 0;
-                    for (CK_ULONG j = 0; j < pPrivateKeyTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
-                        slot_id = (slot_id << 8) | id_bytes[j];
-                    }
-                    LT_PKCS11_LOG("  Slot ID from private template: %lu", slot_id);
+                    char temp[16] = {0};
+                    CK_ULONG copy_len = (pPrivateKeyTemplate[i].ulValueLen < 15) ? pPrivateKeyTemplate[i].ulValueLen : 15;
+                    memcpy(temp, pPrivateKeyTemplate[i].pValue, copy_len);
+                    slot_id = (CK_ULONG)atoi(temp);
+                    LT_PKCS11_LOG("  Slot from private template: %lu", slot_id);
                 }
             }
         }
     }
-    
-    /* Slot must be specified explicitly */
+
+    /* Slot must be specified explicitly via --label */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-        LT_PKCS11_LOG("Slot ID not specified (CKA_ID required): CKR_TEMPLATE_INCOMPLETE");
+        LT_PKCS11_LOG("Slot not specified (use --label): CKR_TEMPLATE_INCOMPLETE");
         return CKR_TEMPLATE_INCOMPLETE;
     }
     
