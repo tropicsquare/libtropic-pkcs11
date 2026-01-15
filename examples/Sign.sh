@@ -1,4 +1,17 @@
 #!/bin/bash
+# Sign data using an ECC key stored in TROPIC01
+# Usage: [SLOT=<slot_number>] [MECH=<mechanism>] [IN=<input_file>] [OUT=<output_file>] ./Sign.sh
+#
+# Example: SLOT=2 MECH=ECDSA ./Sign.sh
+# Example: SLOT=4 MECH=EDDSA IN=/tmp/message.bin ./Sign.sh
+#
+# Mechanism:
+#   1. Calls C_SignInit + C_Sign via pkcs11-tool --sign
+#   2. Input data is sent to TROPIC01 (hash for ECDSA, message for EDDSA)
+#   3. Signing is performed inside the chip using the private key
+#   4. Private key never leaves TROPIC01; only signature is returned
+#   5. Use ECDSA for P-256 keys, EDDSA for Ed25519 keys
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"

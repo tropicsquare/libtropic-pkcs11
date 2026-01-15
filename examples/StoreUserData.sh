@@ -1,4 +1,17 @@
 #!/bin/bash
+# Store and retrieve user data in TROPIC01 R-MEM slots
+# Usage: [SLOT=<slot_number>] [DATA_FILE=<input_file>] ./StoreUserData.sh
+#
+# Example: SLOT=60 ./StoreUserData.sh
+# Example: SLOT=100 DATA_FILE=/tmp/mydata.bin ./StoreUserData.sh
+#
+# Mechanism:
+#   1. R-MEM provides 512 slots (0-511), each storing up to 444 bytes
+#   2. Data is addressed by label "r-mem-slot:<N>" where N is slot number
+#   3. Uses C_CreateObject (--write-object) to store data in R-MEM
+#   4. Uses C_GetAttributeValue (--read-object) to retrieve data
+#   5. Verifies round-trip by comparing original and read-back data
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"

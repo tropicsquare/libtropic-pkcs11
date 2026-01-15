@@ -1,4 +1,14 @@
 #!/bin/bash
+# Build the PKCS#11 module from source
+# Usage: ./Build.sh
+#
+# Creates a clean build in the 'build' directory with logging enabled.
+#
+# Build steps:
+#   1. Remove existing build directory for clean build
+#   2. Run cmake with USB device path and logging enabled
+#   3. Compile with make to produce liblibtropic_pkcs11.so
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
