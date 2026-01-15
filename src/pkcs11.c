@@ -85,7 +85,8 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {0};
  * --------------------------------------------------------------------------- */
  
  
-CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
+CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
+{
     LT_PKCS11_LOG("C_Initialize");
 
     if (pkcs11_ctx.initialized)
@@ -112,7 +113,8 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs) {
 }
  
  
-CK_RV C_Finalize(CK_VOID_PTR pReserved) {
+CK_RV C_Finalize(CK_VOID_PTR pReserved)
+{
     LT_PKCS11_LOG("C_Finalize");
 
     if (pReserved != NULL)
@@ -133,7 +135,8 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved) {
     return CKR_OK;
 }
 
-CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
+CK_RV C_GetInfo(CK_INFO_PTR pInfo)
+{
     LT_PKCS11_LOG("C_GetInfo");
 
     if (!pkcs11_ctx.initialized)
@@ -152,7 +155,8 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo) {
 }
 
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
-                    CK_ULONG_PTR pulCount) {
+                    CK_ULONG_PTR pulCount)
+{
     LT_PKCS11_LOG("C_GetSlotList");
     (void)tokenPresent;
 
@@ -174,7 +178,8 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
     return CKR_OK;
 }
 
-CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
+CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
+{
     LT_PKCS11_LOG("C_GetSlotInfo slot=%lu", slotID);
 
     if (!pkcs11_ctx.initialized)
@@ -205,7 +210,8 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo) {
     return CKR_OK;
 }
 
-CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
+CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
+{
     LT_PKCS11_LOG("C_GetTokenInfo slot=%lu", slotID);
 
     if (!pkcs11_ctx.initialized)
@@ -300,8 +306,9 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo) {
      return CKR_OK;
  }
  
-CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, 
-                    CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession) {
+CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
+                    CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession)
+{
     LT_PKCS11_LOG("C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
         slotID, flags, pApplication, Notify, phSession);
     
@@ -353,7 +360,8 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     return CKR_OK;
 }
 
-CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
+CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
+{
     LT_PKCS11_LOG("C_CloseSession");
 
     if (!pkcs11_ctx.initialized)
@@ -394,7 +402,8 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession) {
  */
 
 CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
-                     CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject) {
+                     CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject)
+{
     LT_PKCS11_LOG("C_CreateObject (hSession=0x%lx, pTemplate=%p, ulCount=%lu, phObject=%p)",
         hSession, pTemplate, ulCount, phObject);
     
@@ -539,7 +548,8 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     return CKR_OK;
 }
 
-CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject) {
+CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
+{
     LT_PKCS11_LOG("C_DestroyObject (hSession=0x%lx, hObject=0x%lx)", hSession, hObject);
     
     /* Library must be initialized */
@@ -589,7 +599,8 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject) {
 }
 
 CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
-                          CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
+                          CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+{
     LT_PKCS11_LOG("C_GetAttributeValue (hSession=0x%lx, hObject=0x%lx, pTemplate=%p, ulCount=%lu)",
         hSession, hObject, pTemplate, ulCount);
     
@@ -1017,7 +1028,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
     return rv;
 }
 
-CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount) {
+CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+{
     LT_PKCS11_LOG("C_FindObjectsInit (hSession=0x%lx, pTemplate=%p, ulCount=%lu)",
         hSession, pTemplate, ulCount);
     
@@ -1106,7 +1118,8 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
 }
 
 CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
-                    CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount) {
+                    CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
+{
     LT_PKCS11_LOG("C_FindObjects (hSession=0x%lx, phObject=%p, ulMaxObjectCount=%lu, pulObjectCount=%p)",
         hSession, phObject, ulMaxObjectCount, pulObjectCount);
     
@@ -1246,7 +1259,8 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     return CKR_OK;
 }
 
-CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
+CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
+{
     LT_PKCS11_LOG("C_FindObjectsFinal (hSession=0x%lx)", hSession);
     
     /* Library must be initialized */
@@ -1294,7 +1308,8 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
   * - C_SeedRandom: Add seed data to RNG (no-op for true HWRNG)
   */
  
- CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen) {
+ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen)
+ {
      LT_PKCS11_LOG("C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
          hSession, pRandomData, ulRandomLen);
      
@@ -1387,8 +1402,9 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
      return CKR_OK;
  }
  
- CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen) {
-     LT_PKCS11_LOG("C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", 
+CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
+{
+    LT_PKCS11_LOG("C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)",
          hSession, pSeed, ulSeedLen);
      
      /* Library must be initialized */
@@ -1429,7 +1445,8 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession) {
  * The private keys never leave the chip - signing is performed inside TROPIC01.
  */
 
-CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey) {
+CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
+{
     LT_PKCS11_LOG("C_SignInit (hSession=0x%lx, pMechanism=%p, hKey=0x%lx)",
         hSession, pMechanism, hKey);
     
@@ -1509,7 +1526,8 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
 }
 
 CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
-             CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen) {
+             CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
+{
     LT_PKCS11_LOG("C_Sign (hSession=0x%lx, pData=%p, ulDataLen=%lu, pSignature=%p, pulSignatureLen=%p)",
         hSession, pData, ulDataLen, pSignature, pulSignatureLen);
     
@@ -1606,7 +1624,8 @@ static const CK_MECHANISM_TYPE supported_mechanisms[] = {
 #define NUM_MECHANISMS (sizeof(supported_mechanisms) / sizeof(supported_mechanisms[0]))
 
 CK_RV C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList,
-                         CK_ULONG_PTR pulCount) {
+                         CK_ULONG_PTR pulCount)
+{
     LT_PKCS11_LOG("C_GetMechanismList (slotID=%lu, pMechanismList=%p, pulCount=%p)",
         slotID, pMechanismList, pulCount);
     
@@ -1641,7 +1660,8 @@ CK_RV C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList
 }
 
 CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
-                         CK_MECHANISM_INFO_PTR pInfo) {
+                         CK_MECHANISM_INFO_PTR pInfo)
+{
     LT_PKCS11_LOG("C_GetMechanismInfo (slotID=%lu, type=0x%lx, pInfo=%p)",
         slotID, type, pInfo);
     
@@ -1682,7 +1702,8 @@ CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
     return CKR_OK;
 }
 
-CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo) {
+CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo)
+{
     LT_PKCS11_LOG("C_GetSessionInfo (hSession=0x%lx, pInfo=%p)", hSession, pInfo);
     
     if (!pkcs11_ctx.initialized) {
@@ -1706,7 +1727,8 @@ CK_RV C_GetSessionInfo(CK_SESSION_HANDLE hSession, CK_SESSION_INFO_PTR pInfo) {
 }
 
 CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
-              CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen) {
+              CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen)
+{
     LT_PKCS11_LOG("C_Login (hSession=0x%lx, userType=%lu, pPin=%p, ulPinLen=%lu)",
         hSession, userType, pPin, ulPinLen);
     
@@ -1743,7 +1765,8 @@ CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
     return CKR_OK;
 }
 
-CK_RV C_Logout(CK_SESSION_HANDLE hSession) {
+CK_RV C_Logout(CK_SESSION_HANDLE hSession)
+{
     LT_PKCS11_LOG("C_Logout (hSession=0x%lx)", hSession);
     
     if (!pkcs11_ctx.initialized) {
@@ -1781,7 +1804,8 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
                         CK_MECHANISM_PTR pMechanism,
                         CK_ATTRIBUTE_PTR pPublicKeyTemplate, CK_ULONG ulPublicKeyAttributeCount,
                         CK_ATTRIBUTE_PTR pPrivateKeyTemplate, CK_ULONG ulPrivateKeyAttributeCount,
-                        CK_OBJECT_HANDLE_PTR phPublicKey, CK_OBJECT_HANDLE_PTR phPrivateKey) {
+                        CK_OBJECT_HANDLE_PTR phPublicKey, CK_OBJECT_HANDLE_PTR phPrivateKey)
+{
     LT_PKCS11_LOG("C_GenerateKeyPair (hSession=0x%lx, pMechanism=%p)", hSession, pMechanism);
     
     /* Library must be initialized */
