@@ -27,7 +27,8 @@ if [ ! -f "$IN" ]; then
     echo "0123456789ABCDEF0123456789ABCDEF" > "$IN"
 fi
 
-# Convert slot to hex for pkcs11-tool --id (CKA_ID is a single byte)
+# Note: pkcs11-tool --sign doesn't pass CKA_LABEL to C_FindObjectsInit (bug/limitation),
+# so we must use --id instead. CKA_ID is slot number as a single byte.
 SLOT_HEX=$(printf '%02x' "$SLOT")
 
 echo "Signing with slot $SLOT (id=0x$SLOT_HEX), mech=$MECH"

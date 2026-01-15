@@ -1016,17 +1016,17 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
         } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_LABEL as slot number (decimal string) */
+            /* Parse CKA_LABEL as slot number (decimal string) - preferred method */
             char temp[16] = {0};
             CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
             memcpy(temp, pTemplate[i].pValue, copy_len);
             find_slot = (CK_ULONG)atoi(temp);
             find_slot_set = CK_TRUE;
             LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_slot);
-        } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_ID as slot number (raw bytes - for ECC keys it's a single byte) */
+        } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0 && !find_slot_set) {
+            /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
             uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-            find_slot = (CK_ULONG)id_bytes[0];  /* First byte is the slot index */
+            find_slot = (CK_ULONG)id_bytes[0];
             find_slot_set = CK_TRUE;
             LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], find_slot);
         }
