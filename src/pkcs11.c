@@ -55,6 +55,9 @@ typedef struct {
     lt_dev_unix_usb_dongle_t lt_device;
     CK_SESSION_HANDLE session_handle;
 
+    /* PKCS#11 function list - must persist for lifetime of library */
+    CK_FUNCTION_LIST functionList;
+
     /* C_FindObjects state */
     CK_BBOOL find_active;
     CK_OBJECT_CLASS find_class;
@@ -1886,32 +1889,37 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
     return CKR_OK;
 }
 
-CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
-     LT_PKCS11_LOG("========================================");
-     LT_PKCS11_LOG("C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
-     LT_PKCS11_LOG("LOADING TROPIC PKCS#11 LIBRARY");
-     LT_PKCS11_LOG("========================================");
-     
-     /* Validate parameter */
-     if (!ppFunctionList) {
-         LT_PKCS11_LOG("ppFunctionList is NULL: CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     /* -----------------------------------------------------------------------
-      * THE FUNCTION LIST
-       -----------------------------------------------------------------------
-      * 
-      * This structure contains pointers to ALL PKCS#11 functions.
-      * The structure is defined in pkcs11.h.
-      * 
-      * We use designated initializers (.member = value) for clarity and safety.
-      * This ensures fields are set correctly regardless of declaration order.
-      * 
-      * Fields set to NULL indicate unimplemented functions. When called,
-      * the application receives CKR_FUNCTION_NOT_SUPPORTED.
-      */
-     static CK_FUNCTION_LIST functionList = {
+CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList)
+{
+    static CK_BBOOL functionList_initialized = CK_FALSE;
+    
+    LT_PKCS11_LOG("========================================");
+    LT_PKCS11_LOG("C_GetFunctionList (ppFunctionList=%p)", ppFunctionList);
+    LT_PKCS11_LOG("LOADING TROPIC PKCS#11 LIBRARY");
+    LT_PKCS11_LOG("========================================");
+    
+    /* Validate parameter */
+    if (!ppFunctionList) {
+        LT_PKCS11_LOG("ppFunctionList is NULL: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    /* Initialize function list once (lazy initialization) */
+    if (!functionList_initialized) {
+        /* -----------------------------------------------------------------------
+         * THE FUNCTION LIST
+         * -----------------------------------------------------------------------
+         * 
+         * This structure contains pointers to ALL PKCS#11 functions.
+         * The structure is defined in pkcs11.h.
+         * 
+         * We use designated initializers (.member = value) for clarity and safety.
+         * This ensures fields are set correctly regardless of declaration order.
+         * 
+         * Fields set to NULL indicate unimplemented functions. When called,
+         * the application receives CKR_FUNCTION_NOT_SUPPORTED.
+         */
+        pkcs11_ctx.functionList = (CK_FUNCTION_LIST){
          /* Cryptoki version this library implements */
          .version = {2, 40},  /* PKCS#11 version 2.40 */
          
@@ -2048,21 +2056,23 @@ CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList) {
          .C_GetFunctionStatus = NULL,            /* Get parallel operation status (deprecated) */
          .C_CancelFunction = NULL,               /* Cancel parallel operation (deprecated) */
          .C_WaitForSlotEvent = NULL,             /* Wait for slot events (not implemented) */
-     };
-     
-     /* Return pointer to our function list */
-     *ppFunctionList = &functionList;
-     
-     /* Log some info about the function pointers (for debugging) */
-     LT_PKCS11_LOG("C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
-     LT_PKCS11_LOG("Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
-         functionList.C_Initialize, functionList.C_Finalize, functionList.C_GetInfo);
-     LT_PKCS11_LOG("Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
-         functionList.C_OpenSession, functionList.C_CloseSession, functionList.C_CloseAllSessions);
-     LT_PKCS11_LOG("Actual function: C_OpenSession=%p", C_OpenSession);
-     
-     return CKR_OK;
- }
+        };
+        functionList_initialized = CK_TRUE;
+    }
+    
+    /* Return pointer to our function list from context */
+    *ppFunctionList = &pkcs11_ctx.functionList;
+    
+    /* Log some info about the function pointers (for debugging) */
+    LT_PKCS11_LOG("C_GetFunctionList OK (function list returned at %p)", *ppFunctionList);
+    LT_PKCS11_LOG("Function pointers: C_Initialize=%p, C_Finalize=%p, C_GetInfo=%p", 
+        pkcs11_ctx.functionList.C_Initialize, pkcs11_ctx.functionList.C_Finalize, pkcs11_ctx.functionList.C_GetInfo);
+    LT_PKCS11_LOG("Function pointers: C_OpenSession=%p, C_CloseSession=%p, C_CloseAllSessions=%p",
+        pkcs11_ctx.functionList.C_OpenSession, pkcs11_ctx.functionList.C_CloseSession, pkcs11_ctx.functionList.C_CloseAllSessions);
+    LT_PKCS11_LOG("Actual function: C_OpenSession=%p", C_OpenSession);
+    
+    return CKR_OK;
+}
  
  /* End of pkcs11.c */
  
