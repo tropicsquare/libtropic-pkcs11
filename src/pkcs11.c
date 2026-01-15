@@ -64,12 +64,8 @@ typedef struct {
     uint16_t find_rmem_index;
     uint8_t find_ecc_index;
     CK_BBOOL find_ecc_done;
-    char find_label[64];
-    CK_ULONG find_label_len;
     CK_BBOOL find_id_set;           /* True if filtering by CKA_ID */
-    CK_ULONG find_id;               /* The ID value to filter by */
-    CK_BBOOL find_id_is_rmem;       /* True if ID has R-MEM prefix (0x80XX) */
-    uint16_t find_rmem_slot;        /* R-MEM slot extracted from ID */
+    CK_ULONG find_id;               /* The ID value to filter by (slot number) */
 
     /* C_Sign state */
     CK_BBOOL sign_active;
@@ -430,14 +426,6 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     CK_BYTE_PTR data_value = NULL;
     CK_ULONG data_len = 0;
     CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
-    char *label_value = NULL;
-    CK_ULONG label_len = 0;
-    
-    /* Debug: log all attributes in template */
-    LT_PKCS11_LOG("Template has %lu attributes:", ulCount);
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-        LT_PKCS11_LOG("  Attr[%lu]: type=0x%lx, len=%lu", i, pTemplate[i].type, pTemplate[i].ulValueLen);
-    }
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
         switch (pTemplate[i].type) {
@@ -453,28 +441,27 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
                 LT_PKCS11_LOG("  CKA_VALUE = %lu bytes", data_len);
                 break;
             case CKA_ID:
-                /* Use CKA_ID as the slot index - parse as big-endian bytes */
+                /* Use CKA_ID as the slot number (for ECC-style access) */
                 if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
                     uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
                     slot_id = 0;
                     for (CK_ULONG j = 0; j < pTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
                         slot_id = (slot_id << 8) | id_bytes[j];
                     }
-                    LT_PKCS11_LOG("  CKA_ID = %lu (parsed from %lu bytes)", slot_id, pTemplate[i].ulValueLen);
+                    LT_PKCS11_LOG("  CKA_ID = %lu (slot)", slot_id);
                 }
                 break;
             case CKA_LABEL:
-                /* Parse label - must be in format "slot:<N>" */
-                label_value = (char*)pTemplate[i].pValue;
-                label_len = pTemplate[i].ulValueLen;
-                LT_PKCS11_LOG("  CKA_LABEL = '%.*s'", (int)label_len, label_value);
-                if (label_value && label_len > 5 && strncmp(label_value, "slot:", 5) == 0) {
-                    slot_id = (CK_ULONG)atoi(label_value + 5);
-                    LT_PKCS11_LOG("  Parsed slot from label: %lu", slot_id);
+                /* Use CKA_LABEL as slot number (pkcs11-tool uses --label for data objects) */
+                if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+                    char temp[16] = {0};
+                    CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
+                    memcpy(temp, pTemplate[i].pValue, copy_len);
+                    slot_id = (CK_ULONG)atoi(temp);
+                    LT_PKCS11_LOG("  CKA_LABEL = '%s' (slot %lu)", temp, slot_id);
                 }
                 break;
             default:
-                /* Ignore other attributes */
                 break;
         }
     }
@@ -500,9 +487,9 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         return CKR_ATTRIBUTE_VALUE_INVALID;
     }
     
-    /* Slot must be specified explicitly */
+    /* Slot must be specified via CKA_ID */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
-        LT_PKCS11_LOG("Slot not specified (CKA_ID or label): CKR_TEMPLATE_INCOMPLETE");
+        LT_PKCS11_LOG("Slot not specified (use --id): CKR_TEMPLATE_INCOMPLETE");
         return CKR_TEMPLATE_INCOMPLETE;
     }
     
@@ -620,9 +607,9 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             return CKR_DEVICE_ERROR;
         }
         
-        /* Generate label for this slot in format: slot:X */
+        /* Generate label for this slot (just the slot number) */
         char label[32];
-        snprintf(label, sizeof(label), "slot:%u", slot);
+        snprintf(label, sizeof(label), "%u", slot);
         CK_ULONG label_len = strlen(label);
         
         const char *application = "TropicSquare";
@@ -1031,11 +1018,8 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
         return CKR_OPERATION_ACTIVE;
     }
     
-    /* Parse template to find object class, label, and ID filters */
-    /* Default: find all objects (0 means no filter) */
+    /* Parse template to find object class and ID/label filters */
     CK_OBJECT_CLASS find_class = 0;
-    char *find_label = NULL;
-    CK_ULONG find_label_len = 0;
     CK_BBOOL find_id_set = CK_FALSE;
     CK_ULONG find_id = 0;
     
@@ -1043,30 +1027,24 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
         if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
-        } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            find_label = (char*)pTemplate[i].pValue;
-            find_label_len = pTemplate[i].ulValueLen;
-            LT_PKCS11_LOG("  Filter CKA_LABEL = '%.*s'", (int)find_label_len, find_label);
         } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_ID as big-endian bytes to get the slot/ID number */
+            /* Parse CKA_ID as big-endian bytes to get the slot number */
             uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
             find_id = 0;
             for (CK_ULONG j = 0; j < pTemplate[i].ulValueLen && j < sizeof(CK_ULONG); j++) {
                 find_id = (find_id << 8) | id_bytes[j];
             }
             find_id_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_ID = %lu (0x%lx)", find_id, find_id);
+            LT_PKCS11_LOG("  Filter CKA_ID = %lu (slot)", find_id);
+        } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+            /* Parse CKA_LABEL as slot number (pkcs11-tool uses --label for data objects) */
+            char temp[16] = {0};
+            CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
+            memcpy(temp, pTemplate[i].pValue, copy_len);
+            find_id = (CK_ULONG)atoi(temp);
+            find_id_set = CK_TRUE;
+            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_id);
         }
-    }
-    
-    /* Detect R-MEM ID format: 2 bytes with first byte = 0x80 (e.g., 0x8005 for slot 5)
-     * This distinguishes R-MEM IDs from ECC IDs */
-    CK_BBOOL find_id_is_rmem = CK_FALSE;
-    uint16_t find_rmem_slot = 0;
-    if (find_id_set && (find_id & 0xFF00) == 0x8000) {
-        find_id_is_rmem = CK_TRUE;
-        find_rmem_slot = (uint16_t)(find_id & 0x00FF);
-        LT_PKCS11_LOG("  Detected R-MEM ID format: slot:%u", find_rmem_slot);
     }
     
     /* Initialize find state */
@@ -1077,23 +1055,9 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     pkcs11_ctx.find_ecc_done = CK_FALSE;
     pkcs11_ctx.find_id_set = find_id_set;
     pkcs11_ctx.find_id = find_id;
-    pkcs11_ctx.find_id_is_rmem = find_id_is_rmem;
-    pkcs11_ctx.find_rmem_slot = find_rmem_slot;
     
-    /* Store label filter */
-    if (find_label && find_label_len > 0) {
-        CK_ULONG copy_len = (find_label_len < sizeof(pkcs11_ctx.find_label) - 1) ? 
-                            find_label_len : sizeof(pkcs11_ctx.find_label) - 1;
-        memcpy(pkcs11_ctx.find_label, find_label, copy_len);
-        pkcs11_ctx.find_label[copy_len] = '\0';
-        pkcs11_ctx.find_label_len = copy_len;
-    } else {
-        pkcs11_ctx.find_label[0] = '\0';
-        pkcs11_ctx.find_label_len = 0;
-    }
-    
-    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, label='%s', id_set=%d, id=%lu)", 
-        find_class, pkcs11_ctx.find_label, find_id_set, find_id);
+    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, id_set=%d, id=%lu)", 
+        find_class, find_id_set, find_id);
     return CKR_OK;
 }
 
@@ -1131,23 +1095,8 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     CK_OBJECT_CLASS find_class = pkcs11_ctx.find_class;
     
     /* Decide which backends to search based on class filter */
-    CK_BBOOL search_rmem;
-    CK_BBOOL search_ecc;
-    if (find_class == 0) {
-        /* No class filter: search both (legacy behaviour) */
-        search_rmem = CK_TRUE;
-        search_ecc = CK_TRUE;
-    } else {
-        /* With class filter: be strict to avoid needless scans */
-        search_rmem = (find_class == CKO_DATA);
-        search_ecc = (find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY);
-    }
-    
-    /* Skip R-MEM search if ID filter is set but it's NOT an R-MEM ID format */
-    if (pkcs11_ctx.find_id_set && !pkcs11_ctx.find_id_is_rmem) {
-        /* ID filter is set but it's an ECC-style ID (not 0x80XX), skip R-MEM */
-        search_rmem = CK_FALSE;
-    }
+    CK_BBOOL search_rmem = (find_class == 0 || find_class == CKO_DATA);
+    CK_BBOOL search_ecc = (find_class == 0 || find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY);
     
     if (search_rmem) {
         uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
@@ -1156,39 +1105,19 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX && *pulObjectCount < ulMaxObjectCount) {
             uint16_t slot = pkcs11_ctx.find_rmem_index++;
             
-            /* If filtering by R-MEM ID, skip slots that don't match */
-            if (pkcs11_ctx.find_id_is_rmem && slot != pkcs11_ctx.find_rmem_slot) {
+            /* If filtering by ID, skip slots that don't match */
+            if (pkcs11_ctx.find_id_set && slot != (uint16_t)pkcs11_ctx.find_id) {
                 continue;
             }
             
             lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf, sizeof(temp_buf), &read_size);
             if (ret == LT_OK) {
-                /* Found a non-empty slot - check label filter if set */
-                CK_BBOOL label_match = CK_TRUE;
-                if (pkcs11_ctx.find_label_len > 0) {
-                    /* Generate the label for this slot */
-                    char slot_label[32];
-                    snprintf(slot_label, sizeof(slot_label), "slot:%u", slot);
-                    /* Check if it matches the filter */
-                    if (strcmp(slot_label, pkcs11_ctx.find_label) != 0) {
-                        label_match = CK_FALSE;
-                    }
-                }
-                
-                if (label_match) {
-                    phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
-                    (*pulObjectCount)++;
-                    LT_PKCS11_LOG("Found DATA object slot:%u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
-                }
+                phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
+                (*pulObjectCount)++;
+                LT_PKCS11_LOG("Found DATA object slot:%u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
             }
             /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
         }
-    }
-    
-    /* Skip ECC search if ID filter is an R-MEM ID format (0x80XX) */
-    if (pkcs11_ctx.find_id_is_rmem) {
-        /* ID filter is R-MEM format (0x80XX), skip ECC */
-        search_ecc = CK_FALSE;
     }
     
     if (search_ecc && !pkcs11_ctx.find_ecc_done) {
@@ -1269,8 +1198,6 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
     pkcs11_ctx.find_ecc_done = CK_FALSE;
     pkcs11_ctx.find_id_set = CK_FALSE;
     pkcs11_ctx.find_id = 0;
-    pkcs11_ctx.find_id_is_rmem = CK_FALSE;
-    pkcs11_ctx.find_rmem_slot = 0;
     
     LT_PKCS11_LOG("C_FindObjectsFinal OK");
     return CKR_OK;
