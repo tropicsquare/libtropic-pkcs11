@@ -710,10 +710,9 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         uint16_t pubkey_len = (curve == TR01_CURVE_P256) ? TR01_CURVE_P256_PUBKEY_LEN : TR01_CURVE_ED25519_PUBKEY_LEN;
         
         /* Generate label for this key */
-        char key_label[48];
-        const char *curve_name = (curve == TR01_CURVE_P256) ? "P256" : "Ed25519";
-        const char *key_type_name = is_private ? "Private" : "Public";
-        snprintf(key_label, sizeof(key_label), "ECC %s Key Slot %u (%s)", key_type_name, slot, curve_name);
+        /* Label is just the slot number (consistent with --label usage) */
+        char key_label[16];
+        snprintf(key_label, sizeof(key_label), "%u", slot);
         CK_ULONG key_label_len = strlen(key_label);
         
         /* Fill in requested attributes for ECC key */
@@ -1017,13 +1016,19 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
         } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_LABEL as slot number */
+            /* Parse CKA_LABEL as slot number (decimal string) */
             char temp[16] = {0};
             CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
             memcpy(temp, pTemplate[i].pValue, copy_len);
             find_slot = (CK_ULONG)atoi(temp);
             find_slot_set = CK_TRUE;
             LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_slot);
+        } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+            /* Parse CKA_ID as slot number (raw bytes - for ECC keys it's a single byte) */
+            uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
+            find_slot = (CK_ULONG)id_bytes[0];  /* First byte is the slot index */
+            find_slot_set = CK_TRUE;
+            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], find_slot);
         }
     }
     

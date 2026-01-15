@@ -27,9 +27,12 @@ if [ ! -f "$IN" ]; then
     echo "0123456789ABCDEF0123456789ABCDEF" > "$IN"
 fi
 
-echo "Signing with slot $SLOT, mech=$MECH"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --sign --mechanism "$MECH" \
-    --label "$SLOT" --input-file "$IN" --output-file "$OUT"
+# Convert slot to hex for pkcs11-tool --id (CKA_ID is a single byte)
+SLOT_HEX=$(printf '%02x' "$SLOT")
+
+echo "Signing with slot $SLOT (id=0x$SLOT_HEX), mech=$MECH"
+pkcs11-tool --module "$MODULE" --sign --mechanism "$MECH" \
+    --id "$SLOT_HEX" --input-file "$IN" --output-file "$OUT"
 
 echo "Signature (first 2 lines):"
 xxd "$OUT" | head -2

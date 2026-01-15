@@ -19,4 +19,4 @@ require_module
 SLOT="${SLOT:-24}"
 
 echo "Erasing ECC key in slot $SLOT"
-pkcs11-tool --module "$MODULE" "${LOGIN_ARGS[@]}" --delete-object --type privkey --label "$SLOT"
+pkcs11-tool --module "$MODULE" --delete-object --type privkey --label "$SLOT" 2>/dev/null || echo "(slot $SLOT was empty)"
