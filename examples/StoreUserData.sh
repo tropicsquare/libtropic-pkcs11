@@ -7,7 +7,7 @@
 #
 # Mechanism:
 #   1. R-MEM provides 512 slots (0-511), each storing up to 444 bytes
-#   2. Data is addressed by label "r-mem-slot:<N>" where N is slot number
+#   2. Data is addressed by label "slot:<N>" where N is slot number
 #   3. Uses C_CreateObject (--write-object) to store data in R-MEM
 #   4. Uses C_GetAttributeValue (--read-object) to retrieve data
 #   5. Verifies round-trip by comparing original and read-back data
@@ -19,7 +19,7 @@ source "$SCRIPT_DIR/common.sh"
 require_module
 
 SLOT="${SLOT:-60}"
-LABEL="r-mem-slot:${SLOT}"
+LABEL="slot:${SLOT}"
 DATA_FILE="${DATA_FILE:-/tmp/rmem_data.bin}"
 READ_FILE="${READ_FILE:-/tmp/rmem_read.bin}"
 
