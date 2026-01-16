@@ -227,7 +227,6 @@ cmake -DTS_USB_DEV="/dev/ttyACM1" ..
 To find your device:
 ```bash
 ls -la /dev/ttyACM*
-dmesg | grep ttyACM
 ```
 
 ### Pairing Keys
