@@ -253,7 +253,6 @@ If you get permission errors accessing `/dev/ttyACM0`:
 
 1. Check USB connection
 2. Verify device path: `ls /dev/ttyACM*`
-3. Check dmesg: `ls /dev/tty*`
 
 ## Security Notice
 
