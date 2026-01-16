@@ -1,19 +1,20 @@
 # libtropic-pkcs11
 
-A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This library provides a standard cryptographic token interface (Cryptoki) to access the TROPIC01's hardware random number generator (HWRNG) and other cryptographic features.
+A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This library provides a standard cryptographic token interface (Cryptoki) to access TROPIC01's security features.
 
 ## Features
 
-- ✅ **Hardware RNG** - Generate cryptographically secure random numbers using TROPIC01's true hardware RNG
-- ✅ **Chip Information** - Read TROPIC01 firmware versions and chip ID
-- ✅ **Secure Sessions** - X25519 key exchange + AES-GCM encrypted communication
+- **Hardware Random Number Generation** - Generate cryptographically secure random numbers using TROPIC01's true hardware RNG
+- **Secure User Data Storage** - Store up to 512 slots of user data (up to 444 bytes each) in TROPIC01's secure R-MEM
+- **ECC Key Generation** - Generate P-256 (secp256r1) and Ed25519 key pairs stored securely in TROPIC01
+- **Digital Signatures** - Sign data using ECDSA (P-256) or EdDSA (Ed25519) - private keys never leave the chip
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Application Layer                            │
-│              (pkcs11-tool, OpenSSL, Firefox, etc.)               │
+│                     Application Layer                           │
+│              (pkcs11-tool, OpenSSL, Firefox, etc.)              │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼ PKCS#11 API
@@ -24,13 +25,13 @@ A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This libr
                               │
                               ▼ libtropic API
 ┌─────────────────────────────────────────────────────────────────┐
-│                        libtropic                                 │
-│          (TROPIC01 Communication Library)                        │
+│                        libtropic                                │
+│          (TROPIC01 Communication Library)                       │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼ USB Serial (/dev/ttyACM0)
 ┌─────────────────────────────────────────────────────────────────┐
-│                    TROPIC01 Secure Element                       │
+│                    TROPIC01 Secure Element                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,107 +42,187 @@ A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This libr
 - Supported development boards: TS1302 devkit
 
 ### Software
-- CMake 3.16+
+- CMake 3.21+
 - GCC or Clang with C99 support
 - Linux (tested on Ubuntu, Debian)
-- Optional: `pkcs11-tool` from OpenSC for testing
+- `pkcs11-tool` from OpenSC for command-line usage
 
 ## Installation
 
-### 1. Clone the Repository
+### 1. Clone and Build
 
 ```bash
-git clone https://github.com/tropicsquare/libtropic-pkcs11.git
+git clone --recursive https://github.com/tropicsquare/libtropic-pkcs11.git
 cd libtropic-pkcs11
-```
-
-### 2. Initialize Submodules
-
-This project depends on the `libtropic-linux` library:
-
-```bash
-git submodule update --init --recursive
-```
-
-### 3. Build
-
-```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake ..
 make
 ```
 
 The compiled PKCS#11 module will be at: `build/liblibtropic_pkcs11.so`
 
-### 4. Verify Build
-
+To use a different USB device path:
 ```bash
-# Check that the library was built
-ls -la build/liblibtropic_pkcs11.so
-
-# Test with pkcs11-tool
-pkcs11-tool --module build/liblibtropic_pkcs11.so --show-info
+cmake -DTS_USB_DEV="/dev/ttyACM1" ..
 ```
 
-## Quick Start
+To enable debug logging:
+```bash
+cmake -DLT_PKCS11_LOG_EN=ON ..
+```
+
+### 2. Verify Installation
+
+```bash
+pkcs11-tool --module ./liblibtropic_pkcs11.so --show-info
+```
+
+## Quick Start Examples
+
+Example scripts are provided in the `examples/` directory. Each script demonstrates one atomic operation.
 
 ### Generate Random Numbers
 
-The main feature of this module is generating random numbers from TROPIC01's hardware RNG:
+Generate cryptographically secure random bytes from TROPIC01's hardware RNG:
 
 ```bash
-# Generate 32 random bytes
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so --generate-random 32
+# Using the example script
+./examples/GenerateRandom.sh
 
-# Save to file and view as hex
+# Or directly with pkcs11-tool
 pkcs11-tool --module ./build/liblibtropic_pkcs11.so --generate-random 32 \
     --output-file /tmp/random.bin && xxd /tmp/random.bin
 ```
 
-**Example Output:**
-```
->>> Random bytes (32 bytes):
-0x26, 0xA9, 0x1B, 0x4F, 0x17, 0xE6, 0x2D, 0x5C,
-0xF0, 0x9F, 0x44, 0xEB, 0x2C, 0xF8, 0xAE, 0x15,
-0x40, 0x6C, 0x14, 0xE6, 0xE7, 0xAB, 0x24, 0xEE,
-0xCD, 0x87, 0x16, 0xC3, 0x01, 0x31, 0x27, 0x75
-```
+### Store User Data
 
-### List Slots
+Write, read, and erase user data in TROPIC01's secure R-MEM storage (512 slots, 0-511):
 
 ```bash
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so --list-slots
+# Store data in slot 60
+echo "My secret data" > /tmp/data.bin
+./examples/StoreUserData.sh   # Uses SLOT=60 by default
+
+# Or directly:
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --write-object /tmp/data.bin --type data --label "60"
+
+# Read data back
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --read-object --type data --label "60" -o /tmp/read.bin && xxd /tmp/read.bin
+
+# Erase data
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --delete-object --type data --label "60"
 ```
 
-### Show Module Info
+### Generate ECC Key Pair
+
+Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC slots (0-31):
 
 ```bash
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so --show-info
+# Generate P-256 key in slot 24
+SLOT=24 ./examples/GenerateKey.sh
+
+# Or directly:
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --keypairgen --key-type EC:secp256r1 --label "24"
+
+# For Ed25519:
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --keypairgen --key-type EC:edwards25519 --label "5"
 ```
+
+### Sign Data
+
+Sign data using a private key stored in TROPIC01 (private key never leaves the chip):
+
+```bash
+# Create test data (32 bytes for ECDSA hash input)
+echo "0123456789ABCDEF0123456789ABCDEF" > /tmp/hash.bin
+
+# Sign with P-256 key in slot 24
+SLOT=24 MECH=ECDSA ./examples/Sign.sh
+
+# Sign with Ed25519 key in slot 5
+SLOT=5 MECH=EDDSA ./examples/Sign.sh
+```
+
+**Note:** For signing, use the slot number in hex format with `--id`:
+```bash
+# Slot 24 = 0x18 in hex
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --sign --mechanism ECDSA --id "18" \
+    --input-file /tmp/hash.bin --output-file /tmp/sig.bin
+```
+
+### Erase ECC Key
+
+```bash
+# Erase key from slot 24
+SLOT=24 ./examples/EraseKey.sh
+
+# Or directly:
+pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+    --delete-object --type privkey --label "24"
+```
+
+### Run All Tests
+
+```bash
+./examples/TestAll.sh
+```
+
+## Slot Specification
+
+All operations require explicit slot specification via `--label`:
+
+| Object Type | Slot Range | Attribute | Example |
+|-------------|------------|-----------|---------|
+| User Data (R-MEM) | 0-511 | `--label "60"` | `--type data --label "60"` |
+| ECC Keys | 0-31 | `--label "24"` | `--keypairgen --label "24"` |
+| Signing* | 0-31 | `--id "18"` | `--sign --id "18"` (slot 24 = 0x18) |
+
+*Note: Due to a pkcs11-tool limitation, signing requires `--id` with the slot number in hex.
 
 ## Implemented PKCS#11 Functions
 
 | Function | Status | Description |
 |----------|--------|-------------|
-| `C_Initialize` | ✅ | Initialize the library |
-| `C_Finalize` | ✅ | Clean up the library |
-| `C_GetInfo` | ✅ | Get library info + TROPIC01 chip info |
+| `C_Initialize` | ✅ | Initialize library, connect to TROPIC01 |
+| `C_Finalize` | ✅ | Clean up, disconnect from TROPIC01 |
+| `C_GetInfo` | ✅ | Get library information |
 | `C_GetFunctionList` | ✅ | Get function pointer table |
 | `C_GetSlotList` | ✅ | List available slots |
 | `C_GetSlotInfo` | ✅ | Get slot information |
-| `C_GetTokenInfo` | ✅ | Get token information |
+| `C_GetTokenInfo` | ✅ | Get token info (chip ID, FW version) |
+| `C_GetMechanismList` | ✅ | List supported mechanisms |
+| `C_GetMechanismInfo` | ✅ | Get mechanism details |
 | `C_OpenSession` | ✅ | Open a session |
 | `C_CloseSession` | ✅ | Close a session |
-| `C_GenerateRandom` | ✅ | **Generate random bytes (HWRNG)** |
-| `C_SeedRandom` | ✅ | No-op (HWRNG doesn't need seeding) |
-| All others | ❌ | Return `CKR_FUNCTION_NOT_SUPPORTED` |
+| `C_Login` | ✅ | No-op (auth via pairing keys) |
+| `C_Logout` | ✅ | No-op |
+| `C_CreateObject` | ✅ | Write data to R-MEM slot |
+| `C_DestroyObject` | ✅ | Erase R-MEM slot or ECC key |
+| `C_GetAttributeValue` | ✅ | Read data/key attributes |
+| `C_FindObjectsInit` | ✅ | Start object search |
+| `C_FindObjects` | ✅ | Find objects (R-MEM/keys) |
+| `C_FindObjectsFinal` | ✅ | End object search |
+| `C_GenerateKeyPair` | ✅ | Generate P-256 or Ed25519 key pair |
+| `C_SignInit` | ✅ | Initialize ECDSA/EdDSA signing |
+| `C_Sign` | ✅ | Sign data (on TROPIC01) |
+| `C_GenerateRandom` | ✅ | Generate random bytes (HWRNG) |
+| `C_SeedRandom` | ✅ | Returns "not supported" (HWRNG) |
 
 ## Configuration
 
 ### USB Device Path
 
-By default, the module communicates with TROPIC01 at `/dev/ttyACM0`. If your device is at a different path, you may need to modify `src/pkcs11.c`.
+The default device path is `/dev/ttyACM0`. To use a different path, pass it to cmake:
+
+```bash
+cmake -DTS_USB_DEV="/dev/ttyACM1" ..
+```
 
 To find your device:
 ```bash
@@ -151,97 +232,29 @@ dmesg | grep ttyACM
 
 ### Pairing Keys
 
-The module uses pairing keys stored in `libtropic/keys/keys.c`. The default keys (sh0) work with standard Tropic Square development chips. For custom-provisioned chips, you may need to update these keys.
-
-## Using with OpenSSL
-
-### OpenSSL 3.x (Provider)
-
-1. Install the PKCS#11 provider:
-   ```bash
-   # Debian/Ubuntu
-   sudo apt-get install openssl-pkcs11-provider
-   ```
-
-2. Configure OpenSSL (create or edit `openssl.cnf`):
-   ```ini
-   openssl_conf = openssl_init
-   
-   [openssl_init]
-   providers = provider_sect
-   
-   [provider_sect]
-   default = default_sect
-   pkcs11 = pkcs11_sect
-   
-   [default_sect]
-   activate = 1
-   
-   [pkcs11_sect]
-   identity = pkcs11prov
-   module = /usr/lib/x86_64-linux-gnu/ossl-modules/pkcs11prov.so
-   module-path = /path/to/build/liblibtropic_pkcs11.so
-   activate = 1
-   ```
-
-3. Generate random data:
-   ```bash
-   OPENSSL_CONF=./openssl.cnf openssl rand -hex 32
-   ```
-
-### Test Script
-
-A test script is provided for OpenSSL integration:
-```bash
-./test_ossl.sh
-```
-
-## Project Structure
-
-```
-libtropic-pkcs11/
-├── src/
-│   ├── pkcs11.c          # PKCS#11 function implementations (~1100 lines, documented)
-│   └── pkcs11.h          # PKCS#11 type definitions (~600 lines, documented)
-├── libtropic/            # libtropic library (submodule)
-│   └── keys/
-│       └── keys.c        # Pairing keys for secure session
-├── CMakeLists.txt        # Build configuration
-├── openssl.cnf           # OpenSSL configuration example
-├── test_ossl.sh          # OpenSSL test script
-├── WHATWASCHANGED.md     # Detailed development documentation
-└── README.md             # This file
-```
+The module uses pairing keys stored in `libtropic/keys/keys.c`. The default keys (sh0) work with standard Tropic Square development chips. For custom-provisioned chips, update these keys.
 
 ## Troubleshooting
 
-### "undefined symbol: lt_port_init"
-The USB port implementation wasn't linked. Ensure `libtropic_port_unix_usb_dongle.c` is in the CMakeLists.txt sources.
-
 ### "LT_L2_HSK_ERR" (Handshake Error)
+
 The pairing keys don't match your chip. Check:
 1. Your chip batch/model
 2. The keys in `libtropic/keys/keys.c`
-3. Try running `lt_ex_hello_world` from libtropic-linux to verify correct keys
+3. Run `lt_ex_hello_world` from libtropic to verify correct keys
 
-### "Bus error" or "SIGBUS"
-This usually indicates a misaligned `CK_FUNCTION_LIST` structure. The header file must have all 68 function pointers in the correct PKCS#11 2.40 order.
+### Device Permission Denied
 
-### Device not found (/dev/ttyACM0)
+If you get permission errors accessing `/dev/ttyACM0`:
+1. Setup UDEV rules (see Installation step 2)
+2. Or run with sudo: `sudo pkcs11-tool --module ...`
+3. Or manually: `sudo chmod 666 /dev/ttyACM0`
+
+### Device Not Found
+
 1. Check USB connection
 2. Verify device path: `ls /dev/ttyACM*`
-3. Check permissions: `sudo chmod 666 /dev/ttyACM0`
-4. Add user to dialout group: `sudo usermod -a -G dialout $USER`
-
-## Documentation
-
-For detailed technical documentation including:
-- Complete code explanations
-- Problems encountered and solutions
-- Build configuration details
-- Future improvement suggestions
-
-See: **[WHATWASCHANGED.md](./WHATWASCHANGED.md)**
+3. Check dmesg: `ls /dev/tty*`
 
 ## Security Notice
 
@@ -253,21 +266,4 @@ See: **[WHATWASCHANGED.md](./WHATWASCHANGED.md)**
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## References
-
-- [PKCS#11 v2.40 Specification (OASIS)](https://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/pkcs11-base-v2.40.html)
-- [libtropic Documentation](https://github.com/tropicsquare/libtropic)
-- [TROPIC01 Product Page](https://tropicsquare.com)
-- [OpenSC pkcs11-tool](https://github.com/OpenSC/OpenSC/wiki/Using-pkcs11-tool)
-
-## Contributing
-
-Contributions are welcome! Please read the development documentation in `WHATWASCHANGED.md` for technical details about the implementation.
-
-## Acknowledgments
-
-- Tropic Square s.r.o. for the TROPIC01 secure element and libtropic library
-- OpenSC project for `pkcs11-tool`
-- OASIS for the PKCS#11 specification
+See the [LICENSE.md](./LICENSE.md) file in the root of this repository or consult license information at [Tropic Square website](https://tropicsquare.com).

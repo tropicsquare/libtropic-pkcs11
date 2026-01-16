@@ -2,8 +2,8 @@
 # Sign data using an ECC key stored in TROPIC01
 # Usage: [SLOT=<slot_number>] [MECH=<mechanism>] [IN=<input_file>] [OUT=<output_file>] ./Sign.sh
 #
-# Example: SLOT=2 MECH=ECDSA ./Sign.sh
-# Example: SLOT=4 MECH=EDDSA IN=/tmp/message.bin ./Sign.sh
+# Example: SLOT=24 MECH=ECDSA ./Sign.sh
+# Example: SLOT=5 MECH=EDDSA IN=/tmp/message.bin ./Sign.sh
 #
 # Mechanism:
 #   1. Calls C_SignInit + C_Sign via pkcs11-tool --sign
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
 require_module
 
-SLOT="${SLOT:-2}"          # P-256 slot by default
+SLOT="${SLOT:-24}"         # P-256 slot by default (same as GenerateKey.sh)
 MECH="${MECH:-ECDSA}"      # Use EDDSA for Ed25519 keys
 IN="${IN:-/tmp/hash.bin}"
 OUT="${OUT:-/tmp/sig_${SLOT}.bin}"
