@@ -48,6 +48,8 @@ add_subdirectory(${PATH_LIBTROPIC} "libtropic")
 target_include_directories(tropic_pkcs11 PRIVATE 
     ${PATH_LIBTROPIC}/hal/port/unix
 )
+# TODO: Add -Wpedantic and clean-up
+target_compile_options(tropic_pkcs11 PUBLIC -Wall -Wextra)
 
 # Link libtropic with your binary.
 target_link_libraries(tropic_pkcs11 PRIVATE tropic)
