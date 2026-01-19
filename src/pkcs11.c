@@ -59,26 +59,26 @@ extern uint8_t sh0pub[];
 
 /* Module context - all global state in one place */
 typedef struct {
-    CK_BBOOL initialized;
-    CK_BBOOL session_open;
-    lt_handle_t lt_handle;
-    lt_dev_unix_usb_dongle_t lt_device;
-    CK_SESSION_HANDLE session_handle;
+    CK_BBOOL                    initialized;
+    CK_BBOOL                    session_open;
+    lt_handle_t                 lt_handle;
+    lt_dev_unix_usb_dongle_t    lt_device;
+    CK_SESSION_HANDLE           session_handle;
 
     /* C_FindObjects state */
-    CK_BBOOL find_active;
-    CK_OBJECT_CLASS find_class;
-    uint16_t find_rmem_index;
-    uint8_t find_ecc_index;
-    CK_BBOOL find_ecc_done;
-    CK_BBOOL find_id_set;           /* True if filtering by slot (via CKA_LABEL) */
-    CK_ULONG find_id;               /* The ID value to filter by (slot number) */
+    CK_BBOOL                    find_active;
+    CK_OBJECT_CLASS             find_class;
+    uint16_t                    find_rmem_index;
+    uint8_t                     find_ecc_index;
+    CK_BBOOL                    find_ecc_done;
+    CK_BBOOL                    find_id_set;    /* True if filtering by slot (via CKA_LABEL) */
+    CK_ULONG                    find_id;        /* The ID value to filter by (slot number) */
 
     /* C_Sign state */
-    CK_BBOOL sign_active;
-    CK_MECHANISM_TYPE sign_mechanism;
-    uint8_t sign_key_slot;
-    lt_ecc_curve_type_t sign_key_curve;
+    CK_BBOOL                    sign_active;
+    CK_MECHANISM_TYPE           sign_mechanism;
+    uint8_t                     sign_key_slot;
+    lt_ecc_curve_type_t         sign_key_curve;
 } lt_pkcs11_ctx_t;
 
 static lt_pkcs11_ctx_t pkcs11_ctx = {0};
@@ -491,29 +491,29 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
         switch (pTemplate[i].type) {
-            case CKA_CLASS:
-                if (pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
-                    obj_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
-                    LT_PKCS11_LOG("  CKA_CLASS = 0x%lx", obj_class);
-                }
-                break;
-            case CKA_VALUE:
-                data_value = (CK_BYTE_PTR)pTemplate[i].pValue;
-                data_len = pTemplate[i].ulValueLen;
-                LT_PKCS11_LOG("  CKA_VALUE = %lu bytes", data_len);
-                break;
-            case CKA_LABEL:
-                /* Use CKA_LABEL as slot number */
-                if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-                    char temp[16] = {0};
-                    CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
-                    memcpy(temp, pTemplate[i].pValue, copy_len);
-                    slot_id = (CK_ULONG)atoi(temp);
-                    LT_PKCS11_LOG("  CKA_LABEL = '%s' (slot %lu)", temp, slot_id);
-                }
-                break;
-            default:
-                break;
+        case CKA_CLASS:
+            if (pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
+                obj_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+                LT_PKCS11_LOG("  CKA_CLASS = 0x%lx", obj_class);
+            }
+            break;
+        case CKA_VALUE:
+            data_value = (CK_BYTE_PTR)pTemplate[i].pValue;
+            data_len = pTemplate[i].ulValueLen;
+            LT_PKCS11_LOG("  CKA_VALUE = %lu bytes", data_len);
+            break;
+        case CKA_LABEL:
+            /* Use CKA_LABEL as slot number */
+            if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
+                char temp[16] = {0};
+                CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
+                memcpy(temp, pTemplate[i].pValue, copy_len);
+                slot_id = (CK_ULONG)atoi(temp);
+                LT_PKCS11_LOG("  CKA_LABEL = '%s' (slot %lu)", temp, slot_id);
+            }
+            break;
+        default:
+            break;
         }
     }
     
@@ -661,85 +661,85 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         /* Fill in requested attributes for CKO_DATA */
         for (CK_ULONG i = 0; i < ulCount; i++) {
             switch (pTemplate[i].type) {
-                case CKA_CLASS: {
-                    CK_OBJECT_CLASS obj_class = CKO_DATA;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
-                        memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
-                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_LABEL:
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = label_len;
-                    } else if (pTemplate[i].ulValueLen >= label_len) {
-                        memcpy(pTemplate[i].pValue, label, label_len);
-                        pTemplate[i].ulValueLen = label_len;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                case CKA_APPLICATION:
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = app_len;
-                    } else if (pTemplate[i].ulValueLen >= app_len) {
-                        memcpy(pTemplate[i].pValue, application, app_len);
-                        pTemplate[i].ulValueLen = app_len;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                case CKA_VALUE:
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = data_size;
-                    } else if (pTemplate[i].ulValueLen >= data_size) {
-                        memcpy(pTemplate[i].pValue, data_buf, data_size);
-                        pTemplate[i].ulValueLen = data_size;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                case CKA_ID: {
-                    /* R-MEM objects use ID format: 2 bytes big-endian with high byte = 0x80
-                     * This distinguishes R-MEM IDs from ECC IDs (which are 0x00-0x1F)
-                     * Example: R-MEM slot 5 → ID = 0x80 0x05 */
-                    uint8_t id_bytes[2] = { 0x80, (uint8_t)slot };
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = 2;
-                    } else if (pTemplate[i].ulValueLen >= 2) {
-                        memcpy(pTemplate[i].pValue, id_bytes, 2);
-                        pTemplate[i].ulValueLen = 2;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_TOKEN: {
-                    CK_BBOOL on_token = CK_TRUE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                default:
+            case CKA_CLASS: {
+                CK_OBJECT_CLASS obj_class = CKO_DATA;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else {
                     pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_ATTRIBUTE_TYPE_INVALID;
-                    break;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_LABEL:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = label_len;
+                } else if (pTemplate[i].ulValueLen >= label_len) {
+                    memcpy(pTemplate[i].pValue, label, label_len);
+                    pTemplate[i].ulValueLen = label_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            case CKA_APPLICATION:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = app_len;
+                } else if (pTemplate[i].ulValueLen >= app_len) {
+                    memcpy(pTemplate[i].pValue, application, app_len);
+                    pTemplate[i].ulValueLen = app_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            case CKA_VALUE:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = data_size;
+                } else if (pTemplate[i].ulValueLen >= data_size) {
+                    memcpy(pTemplate[i].pValue, data_buf, data_size);
+                    pTemplate[i].ulValueLen = data_size;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            case CKA_ID: {
+                /* R-MEM objects use ID format: 2 bytes big-endian with high byte = 0x80
+                    * This distinguishes R-MEM IDs from ECC IDs (which are 0x00-0x1F)
+                    * Example: R-MEM slot 5 → ID = 0x80 0x05 */
+                uint8_t id_bytes[2] = { 0x80, (uint8_t)slot };
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = 2;
+                } else if (pTemplate[i].ulValueLen >= 2) {
+                    memcpy(pTemplate[i].pValue, id_bytes, 2);
+                    pTemplate[i].ulValueLen = 2;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_TOKEN: {
+                CK_BBOOL on_token = CK_TRUE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            default:
+                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                break;
             }
         }
     }
@@ -772,259 +772,259 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         /* Fill in requested attributes for ECC key */
         for (CK_ULONG i = 0; i < ulCount; i++) {
             switch (pTemplate[i].type) {
-                case CKA_CLASS: {
-                    CK_OBJECT_CLASS obj_class = is_private ? CKO_PRIVATE_KEY : CKO_PUBLIC_KEY;
+            case CKA_CLASS: {
+                CK_OBJECT_CLASS obj_class = is_private ? CKO_PRIVATE_KEY : CKO_PUBLIC_KEY;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_LABEL:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = key_label_len;
+                } else if (pTemplate[i].ulValueLen >= key_label_len) {
+                    memcpy(pTemplate[i].pValue, key_label, key_label_len);
+                    pTemplate[i].ulValueLen = key_label_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            case CKA_KEY_TYPE: {
+                CK_KEY_TYPE key_type = (curve == TR01_CURVE_P256) ? CKK_EC : CKK_EC_EDWARDS;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_KEY_TYPE)) {
+                    memcpy(pTemplate[i].pValue, &key_type, sizeof(CK_KEY_TYPE));
+                    pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_ID: {
+                uint8_t id = (uint8_t)slot;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(uint8_t);
+                } else if (pTemplate[i].ulValueLen >= sizeof(uint8_t)) {
+                    memcpy(pTemplate[i].pValue, &id, sizeof(uint8_t));
+                    pTemplate[i].ulValueLen = sizeof(uint8_t);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_VALUE:
+                /* For public keys, return the public key value */
+                /* For private keys, this is sensitive - return CKR_ATTRIBUTE_SENSITIVE per PKCS#11 spec */
+                if (is_private) {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_ATTRIBUTE_SENSITIVE;  /* Private key value cannot be extracted */
+                } else {
                     if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
-                        memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
-                        pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                        pTemplate[i].ulValueLen = pubkey_len;
+                    } else if (pTemplate[i].ulValueLen >= pubkey_len) {
+                        memcpy(pTemplate[i].pValue, pubkey_buf, pubkey_len);
+                        pTemplate[i].ulValueLen = pubkey_len;
                     } else {
                         pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                         rv = CKR_BUFFER_TOO_SMALL;
                     }
-                    break;
                 }
-                case CKA_LABEL:
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = key_label_len;
-                    } else if (pTemplate[i].ulValueLen >= key_label_len) {
-                        memcpy(pTemplate[i].pValue, key_label, key_label_len);
-                        pTemplate[i].ulValueLen = key_label_len;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                case CKA_KEY_TYPE: {
-                    CK_KEY_TYPE key_type = (curve == TR01_CURVE_P256) ? CKK_EC : CKK_EC_EDWARDS;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_KEY_TYPE)) {
-                        memcpy(pTemplate[i].pValue, &key_type, sizeof(CK_KEY_TYPE));
-                        pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_ID: {
-                    uint8_t id = (uint8_t)slot;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(uint8_t);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(uint8_t)) {
-                        memcpy(pTemplate[i].pValue, &id, sizeof(uint8_t));
-                        pTemplate[i].ulValueLen = sizeof(uint8_t);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_VALUE:
-                    /* For public keys, return the public key value */
-                    /* For private keys, this is sensitive - return CKR_ATTRIBUTE_SENSITIVE per PKCS#11 spec */
-                    if (is_private) {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_ATTRIBUTE_SENSITIVE;  /* Private key value cannot be extracted */
-                    } else {
-                        if (pTemplate[i].pValue == NULL) {
-                            pTemplate[i].ulValueLen = pubkey_len;
-                        } else if (pTemplate[i].ulValueLen >= pubkey_len) {
-                            memcpy(pTemplate[i].pValue, pubkey_buf, pubkey_len);
-                            pTemplate[i].ulValueLen = pubkey_len;
-                        } else {
-                            pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                            rv = CKR_BUFFER_TOO_SMALL;
-                        }
-                    }
-                    break;
-                case CKA_EC_POINT: {
-                    /* Return DER-encoded OCTET STRING containing uncompressed EC point */
-                    /* Format: 04 <len> 04 <X> <Y> */
-                    /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
-                    /* For Ed25519: 04 21 04 <32 bytes> = 35 bytes total */
-                    if (is_private) {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_ATTRIBUTE_TYPE_INVALID;
-                    } else {
-                        /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
-                        /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
-                        /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
-                        uint8_t ec_point[68];  /* Max size: 04 41 04 + 64 bytes */
-                        CK_ULONG ec_point_len;
-                        
-                        if (curve == TR01_CURVE_P256) {
-                            /* P-256: OCTET STRING { 04 || X || Y } */
-                            ec_point[0] = 0x04;  /* OCTET STRING tag */
-                            ec_point[1] = 65;    /* Length: 1 + 64 */
-                            ec_point[2] = 0x04;  /* Uncompressed point marker */
-                            memcpy(&ec_point[3], pubkey_buf, 64);
-                            ec_point_len = 67;
-                        } else {
-                            /* Ed25519: OCTET STRING { Y } */
-                            ec_point[0] = 0x04;  /* OCTET STRING tag */
-                            ec_point[1] = 32;    /* Length */
-                            memcpy(&ec_point[2], pubkey_buf, 32);
-                            ec_point_len = 34;
-                        }
-                        
-                        if (pTemplate[i].pValue == NULL) {
-                            pTemplate[i].ulValueLen = ec_point_len;
-                        } else if (pTemplate[i].ulValueLen >= ec_point_len) {
-                            memcpy(pTemplate[i].pValue, ec_point, ec_point_len);
-                            pTemplate[i].ulValueLen = ec_point_len;
-                        } else {
-                            pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                            rv = CKR_BUFFER_TOO_SMALL;
-                        }
-                    }
-                    break;
-                }
-                case CKA_SIGN: {
-                    /* Private keys can sign */
-                    CK_BBOOL can_sign = is_private ? CK_TRUE : CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &can_sign, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_VERIFY: {
-                    /* Public keys can verify */
-                    CK_BBOOL can_verify = is_private ? CK_FALSE : CK_TRUE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &can_verify, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                /* Attributes that are always FALSE for our keys */
-                case CKA_DECRYPT:
-                case CKA_ENCRYPT:
-                case CKA_WRAP:
-                case CKA_UNWRAP:
-                case CKA_DERIVE:
-                case CKA_SIGN_RECOVER:
-                case CKA_VERIFY_RECOVER: {
-                    CK_BBOOL attr_false = CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &attr_false, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                /* Private key specific attributes */
-                case CKA_SENSITIVE:
-                case CKA_ALWAYS_SENSITIVE:
-                case CKA_NEVER_EXTRACTABLE: {
-                    /* Private keys are always sensitive and never extractable */
-                    CK_BBOOL attr_val = is_private ? CK_TRUE : CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &attr_val, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_EXTRACTABLE: {
-                    /* Private keys are NEVER extractable from TROPIC01 */
-                    CK_BBOOL extractable = CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &extractable, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_LOCAL: {
-                    /* Keys generated on chip are local */
-                    CK_BBOOL is_local = (origin == TR01_CURVE_GENERATED) ? CK_TRUE : CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &is_local, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_ALWAYS_AUTHENTICATE: {
-                    /* We don't require per-operation authentication */
-                    CK_BBOOL always_auth = CK_FALSE;
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
-                        memcpy(pTemplate[i].pValue, &always_auth, sizeof(CK_BBOOL));
-                        pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                case CKA_EC_PARAMS: {
-                    /* Return DER-encoded curve OID */
-                    const CK_BYTE *ec_params;
-                    CK_ULONG ec_params_len;
-                    
-                    if (curve == TR01_CURVE_P256) {
-                        /* secp256r1 OID: 1.2.840.10045.3.1.7 */
-                        static const CK_BYTE p256_oid[] = {
-                            0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
-                        };
-                        ec_params = p256_oid;
-                        ec_params_len = sizeof(p256_oid);
-                    } else {
-                        /* Ed25519 OID: 1.3.101.112 */
-                        static const CK_BYTE ed25519_oid[] = {
-                            0x06, 0x03, 0x2B, 0x65, 0x70
-                        };
-                        ec_params = ed25519_oid;
-                        ec_params_len = sizeof(ed25519_oid);
-                    }
-                    
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = ec_params_len;
-                    } else if (pTemplate[i].ulValueLen >= ec_params_len) {
-                        memcpy(pTemplate[i].pValue, ec_params, ec_params_len);
-                        pTemplate[i].ulValueLen = ec_params_len;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
-                    }
-                    break;
-                }
-                default:
+                break;
+            case CKA_EC_POINT: {
+                /* Return DER-encoded OCTET STRING containing uncompressed EC point */
+                /* Format: 04 <len> 04 <X> <Y> */
+                /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
+                /* For Ed25519: 04 21 04 <32 bytes> = 35 bytes total */
+                if (is_private) {
                     pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                     rv = CKR_ATTRIBUTE_TYPE_INVALID;
-                    break;
+                } else {
+                    /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
+                    /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
+                    /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
+                    uint8_t ec_point[68];  /* Max size: 04 41 04 + 64 bytes */
+                    CK_ULONG ec_point_len;
+                    
+                    if (curve == TR01_CURVE_P256) {
+                        /* P-256: OCTET STRING { 04 || X || Y } */
+                        ec_point[0] = 0x04;  /* OCTET STRING tag */
+                        ec_point[1] = 65;    /* Length: 1 + 64 */
+                        ec_point[2] = 0x04;  /* Uncompressed point marker */
+                        memcpy(&ec_point[3], pubkey_buf, 64);
+                        ec_point_len = 67;
+                    } else {
+                        /* Ed25519: OCTET STRING { Y } */
+                        ec_point[0] = 0x04;  /* OCTET STRING tag */
+                        ec_point[1] = 32;    /* Length */
+                        memcpy(&ec_point[2], pubkey_buf, 32);
+                        ec_point_len = 34;
+                    }
+                    
+                    if (pTemplate[i].pValue == NULL) {
+                        pTemplate[i].ulValueLen = ec_point_len;
+                    } else if (pTemplate[i].ulValueLen >= ec_point_len) {
+                        memcpy(pTemplate[i].pValue, ec_point, ec_point_len);
+                        pTemplate[i].ulValueLen = ec_point_len;
+                    } else {
+                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                        rv = CKR_BUFFER_TOO_SMALL;
+                    }
+                }
+                break;
+            }
+            case CKA_SIGN: {
+                /* Private keys can sign */
+                CK_BBOOL can_sign = is_private ? CK_TRUE : CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &can_sign, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_VERIFY: {
+                /* Public keys can verify */
+                CK_BBOOL can_verify = is_private ? CK_FALSE : CK_TRUE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &can_verify, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            /* Attributes that are always FALSE for our keys */
+            case CKA_DECRYPT:
+            case CKA_ENCRYPT:
+            case CKA_WRAP:
+            case CKA_UNWRAP:
+            case CKA_DERIVE:
+            case CKA_SIGN_RECOVER:
+            case CKA_VERIFY_RECOVER: {
+                CK_BBOOL attr_false = CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &attr_false, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            /* Private key specific attributes */
+            case CKA_SENSITIVE:
+            case CKA_ALWAYS_SENSITIVE:
+            case CKA_NEVER_EXTRACTABLE: {
+                /* Private keys are always sensitive and never extractable */
+                CK_BBOOL attr_val = is_private ? CK_TRUE : CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &attr_val, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_EXTRACTABLE: {
+                /* Private keys are NEVER extractable from TROPIC01 */
+                CK_BBOOL extractable = CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &extractable, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_LOCAL: {
+                /* Keys generated on chip are local */
+                CK_BBOOL is_local = (origin == TR01_CURVE_GENERATED) ? CK_TRUE : CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &is_local, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_ALWAYS_AUTHENTICATE: {
+                /* We don't require per-operation authentication */
+                CK_BBOOL always_auth = CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &always_auth, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            case CKA_EC_PARAMS: {
+                /* Return DER-encoded curve OID */
+                const CK_BYTE *ec_params;
+                CK_ULONG ec_params_len;
+                
+                if (curve == TR01_CURVE_P256) {
+                    /* secp256r1 OID: 1.2.840.10045.3.1.7 */
+                    static const CK_BYTE p256_oid[] = {
+                        0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
+                    };
+                    ec_params = p256_oid;
+                    ec_params_len = sizeof(p256_oid);
+                } else {
+                    /* Ed25519 OID: 1.3.101.112 */
+                    static const CK_BYTE ed25519_oid[] = {
+                        0x06, 0x03, 0x2B, 0x65, 0x70
+                    };
+                    ec_params = ed25519_oid;
+                    ec_params_len = sizeof(ed25519_oid);
+                }
+                
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = ec_params_len;
+                } else if (pTemplate[i].ulValueLen >= ec_params_len) {
+                    memcpy(pTemplate[i].pValue, ec_params, ec_params_len);
+                    pTemplate[i].ulValueLen = ec_params_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+            default:
+                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                break;
             }
         }
     }
@@ -1538,23 +1538,23 @@ CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
     memset(pInfo, 0, sizeof(CK_MECHANISM_INFO));
     
     switch (type) {
-        case CKM_EC_KEY_PAIR_GEN:
-            pInfo->ulMinKeySize = 256;
-            pInfo->ulMaxKeySize = 256;
-            pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_F_P;
-            break;
-        case CKM_ECDSA:
-            pInfo->ulMinKeySize = 256;
-            pInfo->ulMaxKeySize = 256;
-            pInfo->flags = CKF_SIGN | CKF_EC_F_P;
-            break;
-        case CKM_EDDSA:
-            pInfo->ulMinKeySize = 256;
-            pInfo->ulMaxKeySize = 256;
-            pInfo->flags = CKF_SIGN;
-            break;
-        default:
-            return CKR_MECHANISM_INVALID;
+    case CKM_EC_KEY_PAIR_GEN:
+        pInfo->ulMinKeySize = 256;
+        pInfo->ulMaxKeySize = 256;
+        pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_F_P;
+        break;
+    case CKM_ECDSA:
+        pInfo->ulMinKeySize = 256;
+        pInfo->ulMaxKeySize = 256;
+        pInfo->flags = CKF_SIGN | CKF_EC_F_P;
+        break;
+    case CKM_EDDSA:
+        pInfo->ulMinKeySize = 256;
+        pInfo->ulMaxKeySize = 256;
+        pInfo->flags = CKF_SIGN;
+        break;
+    default:
+        return CKR_MECHANISM_INVALID;
     }
     
     LT_PKCS11_RETURN(CKR_OK);
