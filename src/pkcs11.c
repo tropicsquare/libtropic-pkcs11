@@ -18,14 +18,24 @@
 #include "libtropic_port.h"
 #include "libtropic_port_unix_usb_dongle.h"
 
+
+/**************************************************************************************************
+ * TROPIC01 specifics
+ *************************************************************************************************/
+
 /* Pairing keys for secure session (defined in libtropic/keys/keys.c) */
 extern uint8_t sh0priv[];
 extern uint8_t sh0pub[];
 
+
+/**************************************************************************************************
+ * PKCS11 context and helpers
+ *************************************************************************************************/
+
 /*
- * Object handle encoding: (TYPE << 16) | SLOT_INDEX
- * R-MEM: 512 slots (0-511), 1-444 bytes each
- * ECC: 32 slots (0-31), P256 or Ed25519
+ * Object handle encoding:  (TYPE << 16) | SLOT_INDEX
+ * R-MEM:                   512 slots (0-511), 1-444 bytes each
+ * ECC:                     32 slots (0-31), P256 or Ed25519
  */
 #define PKCS11_HANDLE_TYPE_RMEM_DATA    0x0001
 #define PKCS11_HANDLE_TYPE_ECC_PRIVKEY  0x0002
@@ -76,17 +86,38 @@ typedef struct {
 
 static lt_pkcs11_ctx_t pkcs11_ctx = {0};
 
-/* ---------------------------------------------------------------------------
+
+/**************************************************************************************************
+ * Logging macros
+ *************************************************************************************************/
+
+#define LT_PKCS11_LOG_DISABLED(...)                              \
+    do {                                                         \
+        if (0) {                                                 \
+            /* Validates format string at compile time */        \
+            printf(__VA_ARGS__);                                 \
+        }                                                        \
+    } while (0)
+
+#if LT_PKCS11_LOG_EN
+    #define LT_PKCS11_LOG(...) do { printf(__VA_ARGS__); printf("\n"); } while(0)
+#else
+    #define LT_PKCS11_LOG(...) LT_PKCS11_LOG_DISABLED(__VA_ARGS__)
+#endif
+
+
+/**************************************************************************************************
  * Core PKCS#11 Functions
- * --------------------------------------------------------------------------- */
- 
+ *************************************************************************************************/
  
 CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 {
     LT_PKCS11_LOG("C_Initialize");
+    (void)pInitArgs;
 
-    if (pkcs11_ctx.initialized)
+    if (pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
+    }
 
     /* Configure USB device passed from build as TS_USB_DEV option */
     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
@@ -113,11 +144,13 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved)
 {
     LT_PKCS11_LOG("C_Finalize");
 
-    if (pReserved != NULL)
+    if (pReserved != NULL) {
         return CKR_ARGUMENTS_BAD;
+    }
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
     /* Close secure session if still open */
     if (pkcs11_ctx.session_open) {
@@ -135,11 +168,13 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 {
     LT_PKCS11_LOG("C_GetInfo");
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-    if (!pInfo)
+    if (!pInfo) {
         return CKR_ARGUMENTS_BAD;
+    }
 
     memset(pInfo, 0, sizeof(CK_INFO));
     pInfo->cryptokiVersion.major = 2;
@@ -156,11 +191,13 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
     LT_PKCS11_LOG("C_GetSlotList");
     (void)tokenPresent;
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-    
-    if (!pulCount)
+    }
+
+    if (!pulCount) {
         return CKR_ARGUMENTS_BAD;
+    }
 
     if (!pSlotList) {
         *pulCount = 1;
@@ -178,14 +215,17 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
     LT_PKCS11_LOG("C_GetSlotInfo slot=%lu", slotID);
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-    if (slotID != 0)
+    if (slotID != 0) {
         return CKR_SLOT_ID_INVALID;
+    }
 
-    if (!pInfo)
+    if (!pInfo) {
         return CKR_ARGUMENTS_BAD;
+    }
 
     memset(pInfo, 0, sizeof(CK_SLOT_INFO));
     strncpy((char *)pInfo->slotDescription, "TROPIC01 Secure Element USB Slot", 64);
@@ -210,11 +250,13 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
     LT_PKCS11_LOG("C_GetTokenInfo slot=%lu", slotID);
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-    if (slotID != 0)
+    if (slotID != 0) {
         return CKR_SLOT_ID_INVALID;
+    }
     
     /* pInfo is required */
     if (!pInfo) {
@@ -271,7 +313,10 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     /* part_num_data contains something like "TR01-C2P-T101" prefixed with length byte */
     if (chip_id.part_num_data[0] > 0 && chip_id.part_num_data[0] < 16) {
         uint8_t model_len = chip_id.part_num_data[0];
-        if (model_len > 15) model_len = 15;
+        if (model_len > 15) {
+            model_len = 15;
+        }
+        
         memcpy(pInfo->model, &chip_id.part_num_data[1], model_len);
         pInfo->model[model_len] = '\0';
     } else {
@@ -360,14 +405,17 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
 {
     LT_PKCS11_LOG("C_CloseSession");
 
-    if (!pkcs11_ctx.initialized)
+    if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
 
-    if (!pkcs11_ctx.session_open)
+    if (!pkcs11_ctx.session_open) {
         return CKR_SESSION_HANDLE_INVALID;
+    }
 
-    if (hSession != pkcs11_ctx.session_handle)
+    if (hSession != pkcs11_ctx.session_handle) {
         return CKR_SESSION_HANDLE_INVALID;
+    }
 
     lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
      if (ret != LT_OK) {
@@ -1042,7 +1090,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     pkcs11_ctx.find_id = find_slot;
     
     LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, slot_set=%d, slot=%lu)", 
-        find_class, find_slot_set, find_slot);
+                  find_class, find_slot_set, find_slot);
     return CKR_OK;
 }
 
@@ -1414,6 +1462,7 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
     
     LT_PKCS11_LOG("C_SignInit OK (slot=%u, mechanism=0x%lx, curve=%d)", 
         slot, pMechanism->mechanism, curve);
+        
     return CKR_OK;
 }
 
