@@ -1,24 +1,38 @@
 cmake_minimum_required(VERSION 3.21.0)
-project(libtropic_pkcs11)
 
-# Enable Position Independent Code for all targets (required for shared library)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+project(libtropic_pkcs11 VERSION 0.1)
 
-# Enable logging (use ON/OFF)
+###############################################################################
+# User configuration
+###############################################################################
 option(LT_PKCS11_LOG_EN "Enable PKCS11 logging" OFF)
-
-# USB device path for TROPIC01 communication
 set(TS_USB_DEV "/dev/ttyACM0" CACHE STRING "Device path for TROPIC01 USB dongle")
 
-# Set path to libtropic (inside libtropic-linux)
+
+###############################################################################
+# Build settings
+###############################################################################
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
-
-# It is necessary to set provider of cryptography functions.
-# You can use e.g. trezor_crypto as the cryptography provider.
-set(LT_CRYPTO "trezor_crypto")
-
-# Enable building examples from libtropic
+set(LT_CRYPTO "trezor_crypto")  
 set(LT_BUILD_EXAMPLES ON CACHE BOOL "Build libtropic examples" FORCE)
+
+
+###############################################################################
+# Print info
+###############################################################################
+message("libtropic PKCS11 build configuration:")
+message("   Version:        ${CMAKE_PROJECT_VERSION}")
+message("   Logging:        ${LT_PKCS11_LOG_EN}")
+message("   USB device:     ${TS_USB_DEV}")
+message("   Libtropic:      ${PATH_LIBTROPIC}")
+message("   Libtropic CAL:  ${LT_CRYPTO}")
+message("")
+
+###############################################################################
+# Library definition
+###############################################################################
 
 add_library(tropic_pkcs11 SHARED
             src/pkcs11.h
@@ -27,6 +41,7 @@ add_library(tropic_pkcs11 SHARED
     	    )
 
 # Add path to the libtropic's repository root folder.
+message("Libtropic initialization:")
 add_subdirectory(${PATH_LIBTROPIC} "libtropic")
 
 # Add include path for Unix HAL port headers
