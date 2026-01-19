@@ -434,9 +434,12 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
 
     lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
-        /* Continue anyway - mark session as closed */
-        // TODO: Should fail here ?
+        LT_PKCS11_LOG("lt_session_abort failed with %s", lt_ret_verbose(ret));
+        
+        pkcs11_ctx.session_open = CK_FALSE;
+        pkcs11_ctx.session_handle = 0;
+
+        LT_PKCS11_RETURN(CKR_GENERAL_ERROR);
     }
      
     pkcs11_ctx.session_open = CK_FALSE;
@@ -1757,7 +1760,7 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
 * When called, the application receives CKR_FUNCTION_NOT_SUPPORTED.
 ***************************************************************************************************/
 static const CK_FUNCTION_LIST pkcs11_fnc_list = {
-    
+
     /* Cryptoki version this library implements */
     .version = {2, 40}, 
 
