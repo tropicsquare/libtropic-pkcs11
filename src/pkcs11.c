@@ -143,7 +143,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 
     lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("lt_init failed: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_init failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
 
@@ -198,8 +198,7 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo)
     LT_PKCS11_RETURN(CKR_OK);
 }
 
-CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
-                    CK_ULONG_PTR pulCount)
+CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList, CK_ULONG_PTR pulCount)
 {
     LT_PKCS11_LOG("(tokenPresen=%d pSlotList=%p pulCount=%p)",
                   tokenPresent, pSlotList, pulCount);
@@ -216,9 +215,9 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
 
     if (!pSlotList) {
         *pulCount = 1;
+    } else if (*pulCount < 1) {
+        LT_PKCS11_RETURN(CKR_BUFFER_TOO_SMALL);
     } else {
-        if (*pulCount < 1)
-            return CKR_BUFFER_TOO_SMALL;
         pSlotList[0] = 0;
         *pulCount = 1;
     }
@@ -291,8 +290,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     struct lt_chip_id_t chip_id = {0};
     lt_ret_t ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
     if (ret != LT_OK) {
-        // TODO: Refactor log
-        LT_PKCS11_LOG("Failed to read chip ID: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_get_info_chip_id failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_TOKEN_NOT_PRESENT);
     }
     
@@ -327,6 +325,9 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     if (ret == LT_OK) {
         pInfo->firmwareVersion.major = fw_ver[3];
         pInfo->firmwareVersion.minor = fw_ver[2];
+    } else {
+        LT_PKCS11_LOG("lt_get_info_riscv_fw_ver failed with: %s", lt_ret_verbose(ret));
+        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
     
     /* Hardware version from chip_id_ver array [major.minor.patch.build] */
@@ -357,15 +358,13 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     /* Label: Model + last 4 hex chars of serial for uniqueness */
     /* e.g., "TR01-C2P-T101-048D" */
     if (pInfo->model[0] != '\0') {
-        snprintf((char*)pInfo->label, 32, "%s-%02X%02X",
-                 pInfo->model,
+        snprintf((char*)pInfo->label, 32, "%s-%02X%02X", pInfo->model,
                  chip_id.ser_num.lot_id[1], chip_id.ser_num.lot_id[2]);
     } else {
         strncpy((char*)pInfo->label, "TROPIC01", 32);
     }
     
-    // TODO: Refactor
-    LT_PKCS11_LOG("C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
+    LT_PKCS11_LOG("(label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
                   pInfo->label, pInfo->model, pInfo->serialNumber,
                   pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
                   pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
@@ -408,10 +407,11 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     }
     
     /* Establish authenticated encrypted session with TROPIC01 */
-    lt_ret_t ret = lt_verify_chip_and_start_secure_session(
-        &pkcs11_ctx.lt_handle, sh0priv, sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv, 
+                    sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("Secure session failed: %s", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_verify_chip_and_start_secure_session failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
 
@@ -439,15 +439,14 @@ CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
     }
 
     lt_ret_t ret = lt_session_abort(&pkcs11_ctx.lt_handle);
-     if (ret != LT_OK) {
-         LT_PKCS11_LOG("Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
-         /* Continue anyway - mark session as closed */
-         // TODO: Should fail here ?
-     }
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("Warning: Failed to abort Secure Session: %s", lt_ret_verbose(ret));
+        /* Continue anyway - mark session as closed */
+        // TODO: Should fail here ?
+    }
      
-     /* Mark session as closed */
-     pkcs11_ctx.session_open = CK_FALSE;
-     pkcs11_ctx.session_handle = 0;
+    pkcs11_ctx.session_open = CK_FALSE;
+    pkcs11_ctx.session_handle = 0;
      
     LT_PKCS11_RETURN(CKR_OK);
 }
@@ -521,7 +520,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         }
     }
     
-    LT_PKCS11_LOG("Parsed: obj_class=0x%lx, data_len=%lu, slot_id=%lu", obj_class, data_len, slot_id);
+    LT_PKCS11_LOG("obj_class=0x%lx, data_len=%lu, slot_id=%lu", obj_class, data_len, slot_id);
     
     /* We only support CKO_DATA objects */
     if (obj_class != CKO_DATA) {
@@ -548,19 +547,18 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
     }
     
-    /* Write data to R-MEM */
     LT_PKCS11_LOG("Writing %lu bytes to slot: %lu", data_len, slot_id);
-    lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value, (uint16_t)data_len);
+
+    lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value, 
+                                       (uint16_t)data_len);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("Failed to write R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_r_mem_data_write failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
     
-    /* Return object handle */
     *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot_id);
 
-    // TODO: What about the following log ?    
-    LT_PKCS11_LOG("C_CreateObject OK (handle=0x%lx, slot=%lu)", *phObject, slot_id);
+    LT_PKCS11_LOG("(handle=0x%lx, slot=%lu)", *phObject, slot_id);
     LT_PKCS11_RETURN(CKR_OK);
 }
 
@@ -588,7 +586,7 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
         ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
         
         if (ret != LT_OK) {
-            LT_PKCS11_LOG("Failed to erase R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            LT_PKCS11_LOG("lt_r_mem_data_erase failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
         
@@ -598,12 +596,11 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
     /* Handle ECC private or public keys */
     if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) || PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
         
-        /* Erase ECC key (both private and public keys are in the same slot) */
         LT_PKCS11_LOG("Erasing ECC key slot:%u", slot);
         ret = lt_ecc_key_erase(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot);
         
         if (ret != LT_OK) {
-            LT_PKCS11_LOG("Failed to erase ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            LT_PKCS11_LOG("lt_ecc_key_erase failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
 
@@ -640,17 +637,19 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
     
     /* Handle R-MEM Data Objects */
     if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+
         uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
         uint16_t data_size = 0;
+
         lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf, sizeof(data_buf), &data_size);
 
         if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
-            LT_PKCS11_LOG("slot:%u is empty: CKR_OBJECT_HANDLE_INVALID", slot);
+            LT_PKCS11_LOG("lt_r_mem_data_read: Slot %d is empty", slot);
             LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
         }
 
         if (ret != LT_OK) {
-            LT_PKCS11_LOG("Failed to read R-MEM: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            LT_PKCS11_LOG("lt_r_mem_data_read failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
         
@@ -756,11 +755,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                        pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
         if (ret == LT_L3_ECC_INVALID_KEY) {
-            LT_PKCS11_LOG("ECC slot %u is empty: CKR_OBJECT_HANDLE_INVALID", slot);
+            LT_PKCS11_LOG("lt_ecc_key_read failed with: Slot %u is empty", slot);
             LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
         }
         if (ret != LT_OK) {
-            LT_PKCS11_LOG("Failed to read ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+            LT_PKCS11_LOG("lt_ecc_key_read failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
         
@@ -1036,7 +1035,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
     }
     
-    // TODO: Reafactor this
+    // TODO: Refactor this
     LT_PKCS11_LOG("C_GetAttributeValue returning 0x%lx", rv);
     return rv;
 }
@@ -1067,9 +1066,11 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     CK_ULONG find_slot = 0;
     
     for (CK_ULONG i = 0; i < ulCount; i++) {
+
         if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
             find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
+
         } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
             /* Parse CKA_LABEL as slot number (decimal string) - preferred method */
             char temp[16] = {0};
@@ -1078,6 +1079,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
             find_slot = (CK_ULONG)atoi(temp);
             find_slot_set = CK_TRUE;
             LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_slot);
+
         } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0 && !find_slot_set) {
             /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
             uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
@@ -1096,9 +1098,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     pkcs11_ctx.find_id_set = find_slot_set;
     pkcs11_ctx.find_id = find_slot;
     
-    // TODO: is this log needed ?
-    LT_PKCS11_LOG("C_FindObjectsInit OK (class=0x%lx, slot_set=%d, slot=%lu)", 
-                  find_class, find_slot_set, find_slot);
+    LT_PKCS11_LOG("(class=0x%lx, slot_set=%d, slot=%lu)", find_class, find_slot_set, find_slot);
     LT_PKCS11_RETURN(CKR_OK);
 }
 
@@ -1151,7 +1151,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             if (ret == LT_OK) {
                 phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
                 (*pulObjectCount)++;
-                LT_PKCS11_LOG("Found DATA object slot:%u (handle=0x%lx)", slot, phObject[*pulObjectCount - 1]);
+                LT_PKCS11_LOG("lt_r_mem_data_read found data in slot: %u", slot);
             }
             /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
         }
@@ -1174,15 +1174,17 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot, 
                                            pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
             if (ret == LT_OK) {
+                
                 /* Found a valid key - add private key handle (if searching for privkey or all) */
                 if (find_class == 0 || find_class == CKO_PRIVATE_KEY) {
                     if (*pulObjectCount < ulMaxObjectCount) {
                         phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot);
                         (*pulObjectCount)++;
                         LT_PKCS11_LOG("Found PRIVATE_KEY at ECC slot %u (handle=0x%lx, curve=%d)", 
-                            slot, phObject[*pulObjectCount - 1], curve);
+                                      slot, phObject[*pulObjectCount - 1], curve);
                     }
                 }
+
                 /* Add public key handle (if searching for pubkey or all) */
                 if (find_class == 0 || find_class == CKO_PUBLIC_KEY) {
                     if (*pulObjectCount < ulMaxObjectCount) {
@@ -1273,14 +1275,7 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
     * 
     * TROPIC01 can return maximum 255 bytes per request (TR01_RANDOM_VALUE_GET_LEN_MAX).
     * For larger requests, we need to make multiple calls and accumulate the data.
-    * 
-    * The hardware RNG uses:
-    * - True random noise sources (thermal noise)
-    * - On-chip entropy conditioning
-    * - NIST SP 800-90B compliant design
-    * 
-    * The secure session was already established in C_OpenSession, so we can
-    * directly request random bytes here.
+    *
     */
     CK_ULONG remaining = ulRandomLen;   /* How many bytes we still need */
     CK_BYTE_PTR ptr = pRandomData;      /* Where to write next bytes */
@@ -1293,7 +1288,7 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
         /* Request random bytes from the chip */
         lt_ret_t ret = lt_random_value_get(&pkcs11_ctx.lt_handle, ptr, chunk_size);
         if (ret != LT_OK) {
-            LT_PKCS11_LOG("Failed to get random bytes: %s", lt_ret_verbose(ret));
+            LT_PKCS11_LOG("lt_random_value_get failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
         
@@ -1307,16 +1302,12 @@ CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_U
         LT_PKCS11_LOG("0x%02X", pRandomData[i]);
     }
     
-    // TODO: Is this log needed ?
-    LT_PKCS11_LOG("C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
-    
     LT_PKCS11_RETURN(CKR_OK);
 }
  
 CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
 {
-    LT_PKCS11_LOG("(hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)",
-                  hSession, pSeed, ulSeedLen);
+    LT_PKCS11_LOG("(hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)", hSession, pSeed, ulSeedLen);
      
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1339,8 +1330,7 @@ CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSee
 
 CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    LT_PKCS11_LOG("(hSession=0x%lx, pMechanism=%p, hKey=0x%lx)",
-                  hSession, pMechanism, hKey);
+    LT_PKCS11_LOG("(hSession=0x%lx, pMechanism=%p, hKey=0x%lx)", hSession, pMechanism, hKey);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1377,11 +1367,11 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
     lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                    pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
     if (ret == LT_L3_ECC_INVALID_KEY) {
-        LT_PKCS11_LOG("ECC slot %u is empty: CKR_KEY_HANDLE_INVALID", slot);
+        LT_PKCS11_LOG("lt_ecc_key_read ECC slot %u is empty", slot);
         LT_PKCS11_RETURN(CKR_KEY_HANDLE_INVALID);
     }
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("Failed to read ECC key: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_ecc_key_read failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
     
@@ -1395,7 +1385,6 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
             LT_PKCS11_RETURN(CKR_KEY_TYPE_INCONSISTENT);
         }
     } else {
-        LT_PKCS11_LOG("Unsupported mechanism 0x%lx: CKR_MECHANISM_INVALID", pMechanism->mechanism);
         LT_PKCS11_RETURN(CKR_MECHANISM_INVALID);
     }
     
@@ -1405,10 +1394,7 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
     pkcs11_ctx.sign_key_slot = slot;
     pkcs11_ctx.sign_key_curve = curve;
     
-    // TODO: Is this log needed ?
-    LT_PKCS11_LOG("C_SignInit OK (slot=%u, mechanism=0x%lx, curve=%d)", 
-                  slot, pMechanism->mechanism, curve);
-
+    LT_PKCS11_LOG("slot=%u, mechanism=0x%lx, curve=%d)", slot, pMechanism->mechanism, curve);
     LT_PKCS11_RETURN(CKR_OK);
 }
 
@@ -1416,7 +1402,7 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
              CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
     LT_PKCS11_LOG("(hSession=0x%lx, pData=%p, ulDataLen=%lu, pSignature=%p, pulSignatureLen=%p)",
-        hSession, pData, ulDataLen, pSignature, pulSignatureLen);
+                  hSession, pData, ulDataLen, pSignature, pulSignatureLen);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1438,8 +1424,11 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
         LT_PKCS11_RETURN(CKR_ARGUMENTS_BAD);
     }
     
+    // TODO: Check EDDSA max message size !
+
     /* Signature is always 64 bytes (R + S) */
     if (pSignature == NULL) {
+        // TODO: Check this
         /* Query mode - return required signature length */
         *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
         LT_PKCS11_LOG("Query mode: signature length = %lu", *pulSignatureLen);
@@ -1451,19 +1440,29 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
         *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
         LT_PKCS11_RETURN(CKR_BUFFER_TOO_SMALL);
     }
-    
-    lt_ret_t ret;
-    
+        
     /* Perform signing based on mechanism */
     if (pkcs11_ctx.sign_mechanism == CKM_ECDSA) {
-        LT_PKCS11_LOG("Performing ECDSA sign on slot %u", pkcs11_ctx.sign_key_slot);
-        ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
-                                pData, ulDataLen, pSignature);
+        LT_PKCS11_LOG("Signing with ECDSA on slot %u", pkcs11_ctx.sign_key_slot);
+        lt_ret_t ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle, 
+                                         (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+                                         pData, ulDataLen, pSignature);
+
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("lt_ecc_ecdsa_sign failed with %s", lt_ret_verbose(ret));
+            LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+        }
+
     } else {
-        /* CKM_EDDSA */
-        LT_PKCS11_LOG("Performing EdDSA sign on slot %u", pkcs11_ctx.sign_key_slot);
-        ret = lt_ecc_eddsa_sign(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
-                                pData, (uint16_t)ulDataLen, pSignature);
+        LT_PKCS11_LOG("Signing with EDDSA on slot %u", pkcs11_ctx.sign_key_slot);
+        lt_ret_t ret = lt_ecc_eddsa_sign(&pkcs11_ctx.lt_handle,
+                                         (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+                                         pData, (uint16_t)ulDataLen, pSignature);
+
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("lt_ecc_eddsa_sign failed with %s", lt_ret_verbose(ret));
+            LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+        }
     }
     
     /* Clear sign state (operation is complete) */
@@ -1471,16 +1470,9 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
     pkcs11_ctx.sign_mechanism = 0;
     pkcs11_ctx.sign_key_slot = 0;
     pkcs11_ctx.sign_key_curve = 0;
-    
-    if (ret != LT_OK) {
-        LT_PKCS11_LOG("Signing failed: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
-        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
-    }
-    
+        
     *pulSignatureLen = TR01_ECDSA_EDDSA_SIGNATURE_LENGTH;
     
-    // TODO: Refactor following log
-    LT_PKCS11_LOG("C_Sign OK (signature length = %lu)", *pulSignatureLen);
     LT_PKCS11_RETURN(CKR_OK);
 }
 
@@ -1747,23 +1739,18 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
         LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
     }
     
-    /* Generate the key pair on TROPIC01 */
     LT_PKCS11_LOG("Generating %s key in ECC slot %lu...", 
                   (curve == TR01_CURVE_P256) ? "P-256" : "Ed25519", slot_id);
-    
+
     lt_ret_t ret = lt_ecc_key_generate(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot_id, curve);
     if (ret != LT_OK) {
-        LT_PKCS11_LOG("Key generation failed: %s: CKR_DEVICE_ERROR", lt_ret_verbose(ret));
+        LT_PKCS11_LOG("lt_ecc_key_generate failed with %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
     
-    /* Return handles for both keys */
     *phPrivateKey = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot_id);
     *phPublicKey = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot_id);
     
-    // TODO: Following log can be refactored
-    LT_PKCS11_LOG("C_GenerateKeyPair OK (slot=%lu, privKey=0x%lx, pubKey=0x%lx)", 
-                  slot_id, *phPrivateKey, *phPublicKey);
     LT_PKCS11_RETURN(CKR_OK);
 }
 
