@@ -12,7 +12,7 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-MODULE="$ROOT_DIR/build/liblibtropic_pkcs11.so"
+MODULE="$ROOT_DIR/build/libtropic_pkcs11.so"
 
 # PIN handling (default empty)
 PIN="1234"

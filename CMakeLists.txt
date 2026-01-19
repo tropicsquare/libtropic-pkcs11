@@ -20,7 +20,7 @@ set(LT_CRYPTO "trezor_crypto")
 # Enable building examples from libtropic
 set(LT_BUILD_EXAMPLES ON CACHE BOOL "Build libtropic examples" FORCE)
 
-add_library(libtropic_pkcs11 SHARED
+add_library(tropic_pkcs11 SHARED
             src/pkcs11.h
             src/pkcs11.c
             ${PATH_LIBTROPIC}/hal/port/unix/libtropic_port_unix_usb_dongle.c
@@ -30,19 +30,19 @@ add_library(libtropic_pkcs11 SHARED
 add_subdirectory(${PATH_LIBTROPIC} "libtropic")
 
 # Add include path for Unix HAL port headers
-target_include_directories(libtropic_pkcs11 PRIVATE 
+target_include_directories(tropic_pkcs11 PRIVATE 
     ${PATH_LIBTROPIC}/hal/port/unix
 )
 
 # Link libtropic with your binary.
-target_link_libraries(libtropic_pkcs11 PRIVATE tropic)
+target_link_libraries(tropic_pkcs11 PRIVATE tropic)
 
 # Convert CMake boolean (ON/OFF) to C preprocessor integer (1/0)
 if(LT_PKCS11_LOG_EN)
-    target_compile_definitions(libtropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=1)
+    target_compile_definitions(tropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=1)
 else()
-    target_compile_definitions(libtropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=0)
+    target_compile_definitions(tropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=0)
 endif()
 
 # Pass device path as a compile definition (with quotes for string literal)
-target_compile_definitions(libtropic_pkcs11 PRIVATE TS_USB_DEV="${TS_USB_DEV}")
+target_compile_definitions(tropic_pkcs11 PRIVATE TS_USB_DEV="${TS_USB_DEV}")

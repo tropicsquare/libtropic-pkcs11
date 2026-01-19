@@ -19,7 +19,7 @@ A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This libr
                               │
                               ▼ PKCS#11 API
 ┌─────────────────────────────────────────────────────────────────┐
-│                   liblibtropic_pkcs11.so                        │
+│                     libtropic_pkcs11.so                         │
 │                    (This PKCS#11 Module)                        │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -59,7 +59,7 @@ cmake ..
 make
 ```
 
-The compiled PKCS#11 module will be at: `build/liblibtropic_pkcs11.so`
+The compiled PKCS#11 module will be at: `build/libtropic_pkcs11.so`
 
 To use a different USB device path:
 ```bash
@@ -74,7 +74,7 @@ cmake -DLT_PKCS11_LOG_EN=ON ..
 ### 2. Verify Installation
 
 ```bash
-pkcs11-tool --module ./liblibtropic_pkcs11.so --show-info
+pkcs11-tool --module ./libtropic_pkcs11.so --show-info
 ```
 
 ## Quick Start Examples
@@ -90,7 +90,7 @@ Generate cryptographically secure random bytes from TROPIC01's hardware RNG:
 ./examples/GenerateRandom.sh
 
 # Or directly with pkcs11-tool
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so --generate-random 32 \
+pkcs11-tool --module ./build/libtropic_pkcs11.so --generate-random 32 \
     --output-file /tmp/random.bin && xxd /tmp/random.bin
 ```
 
@@ -104,15 +104,15 @@ echo "My secret data" > /tmp/data.bin
 ./examples/StoreUserData.sh   # Uses SLOT=60 by default
 
 # Or directly:
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --write-object /tmp/data.bin --type data --label "60"
 
 # Read data back
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --read-object --type data --label "60" -o /tmp/read.bin && xxd /tmp/read.bin
 
 # Erase data
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type data --label "60"
 ```
 
@@ -125,11 +125,11 @@ Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC slots (0-31):
 SLOT=24 ./examples/GenerateKey.sh
 
 # Or directly:
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --keypairgen --key-type EC:secp256r1 --label "24"
 
 # For Ed25519:
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --keypairgen --key-type EC:edwards25519 --label "5"
 ```
 
@@ -151,7 +151,7 @@ SLOT=5 MECH=EDDSA ./examples/Sign.sh
 **Note:** For signing, use the slot number in hex format with `--id`:
 ```bash
 # Slot 24 = 0x18 in hex
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --sign --mechanism ECDSA --id "18" \
     --input-file /tmp/hash.bin --output-file /tmp/sig.bin
 ```
@@ -163,7 +163,7 @@ pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
 SLOT=24 ./examples/EraseKey.sh
 
 # Or directly:
-pkcs11-tool --module ./build/liblibtropic_pkcs11.so \
+pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type privkey --label "24"
 ```
 

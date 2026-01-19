@@ -88,7 +88,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     if (pkcs11_ctx.initialized)
         return CKR_CRYPTOKI_ALREADY_INITIALIZED;
 
-    /* Configure USB device (path from CMake TS_USB_DEV option) */
+    /* Configure USB device passed from build as TS_USB_DEV option */
     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
     strncpy(pkcs11_ctx.lt_device.dev_path, TS_USB_DEV,
             sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
