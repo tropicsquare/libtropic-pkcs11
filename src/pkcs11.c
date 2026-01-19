@@ -112,7 +112,8 @@ static lt_pkcs11_ctx_t pkcs11_ctx = {0};
  
 CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
 {
-    LT_PKCS11_LOG("C_Initialize");
+    LT_PKCS11_LOG("C_Initialize (pInitArgs=%p)", pInitArgs);
+
     (void)pInitArgs;
 
     if (pkcs11_ctx.initialized) {
@@ -142,7 +143,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
  
 CK_RV C_Finalize(CK_VOID_PTR pReserved)
 {
-    LT_PKCS11_LOG("C_Finalize");
+    LT_PKCS11_LOG("C_Finalize (pReserved=%p)", pReserved);
 
     if (pReserved != NULL) {
         return CKR_ARGUMENTS_BAD;
@@ -166,7 +167,7 @@ CK_RV C_Finalize(CK_VOID_PTR pReserved)
 
 CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 {
-    LT_PKCS11_LOG("C_GetInfo");
+    LT_PKCS11_LOG("C_GetInfo (pInfo=%p)", pInfo);
 
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -188,7 +189,9 @@ CK_RV C_GetInfo(CK_INFO_PTR pInfo)
 CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
                     CK_ULONG_PTR pulCount)
 {
-    LT_PKCS11_LOG("C_GetSlotList");
+    LT_PKCS11_LOG("C_GetSlotList: (tokenPresen=%d pSlotList=%p pulCount=%p)",
+                  tokenPresent, pSlotList, pulCount);
+
     (void)tokenPresent;
 
     if (!pkcs11_ctx.initialized) {
@@ -213,7 +216,7 @@ CK_RV C_GetSlotList(CK_BBOOL tokenPresent, CK_SLOT_ID_PTR pSlotList,
 
 CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 {
-    LT_PKCS11_LOG("C_GetSlotInfo slot=%lu", slotID);
+    LT_PKCS11_LOG("C_GetSlotInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
 
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -248,7 +251,7 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 
 CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 {
-    LT_PKCS11_LOG("C_GetTokenInfo slot=%lu", slotID);
+    LT_PKCS11_LOG("C_GetTokenInfo (slotID=%lu, pInfo=%p)", slotID, pInfo);
 
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -258,9 +261,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
         return CKR_SLOT_ID_INVALID;
     }
     
-    /* pInfo is required */
     if (!pInfo) {
-        LT_PKCS11_LOG("pInfo is NULL: CKR_ARGUMENTS_BAD");
         return CKR_ARGUMENTS_BAD;
     }
     
@@ -326,35 +327,36 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     /* Serial number from batch_id + lot_id (unique per chip) */
     /* Note: 7 bytes = 14 hex chars + null terminator = 15 bytes, fits in 16-byte field */
     snprintf((char*)pInfo->serialNumber, 16, "%02X%02X%02X%02X%02X%02X%02X",
-        chip_id.batch_id[0], chip_id.batch_id[1], chip_id.batch_id[2],
-        chip_id.batch_id[3], chip_id.batch_id[4],
-        chip_id.ser_num.lot_id[0], chip_id.ser_num.lot_id[1]);
+              chip_id.batch_id[0], chip_id.batch_id[1], chip_id.batch_id[2],
+              chip_id.batch_id[3], chip_id.batch_id[4],
+              chip_id.ser_num.lot_id[0], chip_id.ser_num.lot_id[1]);
     
     /* Label: Model + last 4 hex chars of serial for uniqueness */
     /* e.g., "TR01-C2P-T101-048D" */
     if (pInfo->model[0] != '\0') {
         snprintf((char*)pInfo->label, 32, "%s-%02X%02X",
-            pInfo->model,
-            chip_id.ser_num.lot_id[1], chip_id.ser_num.lot_id[2]);
+                 pInfo->model,
+                 chip_id.ser_num.lot_id[1], chip_id.ser_num.lot_id[2]);
     } else {
         strncpy((char*)pInfo->label, "TROPIC01", 32);
     }
     
     LT_PKCS11_LOG("C_GetTokenInfo OK (label='%.32s', model='%.16s', serial='%.16s', HW=%d.%d, FW=%d.%d)",
-        pInfo->label, pInfo->model, pInfo->serialNumber,
-        pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
-        pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
-     return CKR_OK;
+                  pInfo->label, pInfo->model, pInfo->serialNumber,
+                  pInfo->hardwareVersion.major, pInfo->hardwareVersion.minor,
+                  pInfo->firmwareVersion.major, pInfo->firmwareVersion.minor);
+
+    return CKR_OK;
  }
  
 CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
                     CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession)
 {
     LT_PKCS11_LOG("C_OpenSession (slotID=%lu, flags=0x%lx, pApplication=%p, Notify=%p, phSession=%p)", 
-        slotID, flags, pApplication, Notify, phSession);
+                  slotID, flags, pApplication, Notify, phSession);
     
-    (void)pApplication;  /* Unused - we don't support notifications */
-    (void)Notify;        /* Unused - we don't support notifications */
+    (void)pApplication;
+    (void)Notify;
     
     /* Library must be initialized first */
     if (!pkcs11_ctx.initialized) {
@@ -403,7 +405,7 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
 
 CK_RV C_CloseSession(CK_SESSION_HANDLE hSession)
 {
-    LT_PKCS11_LOG("C_CloseSession");
+    LT_PKCS11_LOG("C_CloseSession (hSession=0x%lx)", hSession);
 
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -449,7 +451,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
                      CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phObject)
 {
     LT_PKCS11_LOG("C_CreateObject (hSession=0x%lx, pTemplate=%p, ulCount=%lu, phObject=%p)",
-        hSession, pTemplate, ulCount, phObject);
+                   hSession, pTemplate, ulCount, phObject);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -606,7 +608,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                           CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
     LT_PKCS11_LOG("C_GetAttributeValue (hSession=0x%lx, hObject=0x%lx, pTemplate=%p, ulCount=%lu)",
-        hSession, hObject, pTemplate, ulCount);
+                   hSession, hObject, pTemplate, ulCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1034,7 +1036,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
 {
     LT_PKCS11_LOG("C_FindObjectsInit (hSession=0x%lx, pTemplate=%p, ulCount=%lu)",
-        hSession, pTemplate, ulCount);
+                   hSession, pTemplate, ulCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1098,7 +1100,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
                     CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
 {
     LT_PKCS11_LOG("C_FindObjects (hSession=0x%lx, phObject=%p, ulMaxObjectCount=%lu, pulObjectCount=%p)",
-        hSession, phObject, ulMaxObjectCount, pulObjectCount);
+                  hSession, phObject, ulMaxObjectCount, pulObjectCount);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1236,159 +1238,119 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
     return CKR_OK;
 }
 
-
-/* ---------------------------------------------------------------------------
- * RANDOM NUMBER GENERATION FUNCTIONS
- * --------------------------------------------------------------------------
-  * 
-  * This is the main functionality of this PKCS#11 module!
-  * 
-  * We implement:
-  * - C_GenerateRandom: Get random bytes from TROPIC01's hardware RNG
-  * - C_SeedRandom: Add seed data to RNG (no-op for true HWRNG)
-  */
  
- CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen)
- {
-     LT_PKCS11_LOG("C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
-         hSession, pRandomData, ulRandomLen);
-     
-     /* -----------------------------------------------------------------------
-      * STEP 1: VALIDATE STATE AND PARAMETERS
-       -----------------------------------------------------------------------
-      */
-     
-     /* Library must be initialized */
-     if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
-         return CKR_CRYPTOKI_NOT_INITIALIZED;
-     }
-     
-     /* Session must be open (secure session established) */
-     if (!pkcs11_ctx.session_open) {
-         LT_PKCS11_LOG("No session open: CKR_SESSION_HANDLE_INVALID");
-         return CKR_SESSION_HANDLE_INVALID;
-     }
-     
-     /* Verify session handle */
-     if (hSession != pkcs11_ctx.session_handle) {
-         LT_PKCS11_LOG("Invalid session handle 0x%lx (expected 0x%lx): CKR_SESSION_HANDLE_INVALID", 
-             hSession, pkcs11_ctx.session_handle);
-         return CKR_SESSION_HANDLE_INVALID;
-     }
-     
-     /* Per PKCS#11 spec: requesting 0 bytes is valid and should just succeed */
-     if (ulRandomLen == 0) {
-         LT_PKCS11_LOG("ulRandomLen is 0: CKR_OK (valid no-op per spec)");
-         return CKR_OK;
-     }
-     
-     /* Validate output buffer */
-     if (!pRandomData) {
-         LT_PKCS11_LOG("pRandomData is NULL: CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     /* -----------------------------------------------------------------------
-      * STEP 2: GET RANDOM BYTES FROM HARDWARE RNG
-       -----------------------------------------------------------------------
-      * 
-      * TROPIC01 can return maximum 255 bytes per request (TR01_RANDOM_VALUE_GET_LEN_MAX).
-      * For larger requests, we need to make multiple calls and accumulate the data.
-      * 
-      * The hardware RNG uses:
-      * - True random noise sources (thermal noise)
-      * - On-chip entropy conditioning
-      * - NIST SP 800-90B compliant design
-      * 
-      * The secure session was already established in C_OpenSession, so we can
-      * directly request random bytes here.
-      */
-     CK_ULONG remaining = ulRandomLen;   /* How many bytes we still need */
-     CK_BYTE_PTR ptr = pRandomData;      /* Where to write next bytes */
-     
-     while (remaining > 0) {
-         /* Calculate chunk size: either remaining bytes or max allowed, whichever is smaller */
-         uint16_t chunk_size = (remaining > TR01_RANDOM_VALUE_GET_LEN_MAX) ? 
+CK_RV C_GenerateRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pRandomData, CK_ULONG ulRandomLen)
+{
+    LT_PKCS11_LOG("C_GenerateRandom (hSession=0x%lx, pRandomData=%p, ulRandomLen=%lu)", 
+                  hSession, pRandomData, ulRandomLen);
+    
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open (secure session established) */
+    if (!pkcs11_ctx.session_open) {
+        LT_PKCS11_LOG("No session open: CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Verify session handle */
+    if (hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session handle 0x%lx (expected 0x%lx): CKR_SESSION_HANDLE_INVALID", 
+            hSession, pkcs11_ctx.session_handle);
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Per PKCS#11 spec: requesting 0 bytes is valid and should just succeed */
+    if (ulRandomLen == 0) {
+        LT_PKCS11_LOG("ulRandomLen is 0: CKR_OK (valid no-op per spec)");
+        return CKR_OK;
+    }
+    
+    /* Validate output buffer */
+    if (!pRandomData) {
+        LT_PKCS11_LOG("pRandomData is NULL: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+   /* -----------------------------------------------------------------------
+    *  GET RANDOM BYTES FROM HARDWARE RNG
+    * -----------------------------------------------------------------------
+    * 
+    * TROPIC01 can return maximum 255 bytes per request (TR01_RANDOM_VALUE_GET_LEN_MAX).
+    * For larger requests, we need to make multiple calls and accumulate the data.
+    * 
+    * The hardware RNG uses:
+    * - True random noise sources (thermal noise)
+    * - On-chip entropy conditioning
+    * - NIST SP 800-90B compliant design
+    * 
+    * The secure session was already established in C_OpenSession, so we can
+    * directly request random bytes here.
+    */
+    CK_ULONG remaining = ulRandomLen;   /* How many bytes we still need */
+    CK_BYTE_PTR ptr = pRandomData;      /* Where to write next bytes */
+    
+    while (remaining > 0) {
+        /* Calculate chunk size: either remaining bytes or max allowed, whichever is smaller */
+        uint16_t chunk_size = (remaining > TR01_RANDOM_VALUE_GET_LEN_MAX) ? 
                                TR01_RANDOM_VALUE_GET_LEN_MAX : (uint16_t)remaining;
-         
-         /* Request random bytes from the chip */
-         lt_ret_t ret = lt_random_value_get(&pkcs11_ctx.lt_handle, ptr, chunk_size);
-         if (ret != LT_OK) {
-             LT_PKCS11_LOG("Failed to get random bytes: %s", lt_ret_verbose(ret));
-             return CKR_DEVICE_ERROR;
-         }
-         
-         /* Move pointer forward and decrease remaining count */
-         ptr += chunk_size;
-         remaining -= chunk_size;
-     }
-     
-     /* -----------------------------------------------------------------------
-      * STEP 3: DEBUG OUTPUT - PRINT RANDOM BYTES IN HEX
-       -----------------------------------------------------------------------
-      * 
-      * Print the generated random bytes for verification.
-      * Format: 0xAA, 0xBB, 0xCC, ...
-      * 
-      * NOTE: Remove this for production use - it pollutes stdout.
-      */
-     LT_PKCS11_LOG("Random bytes (%lu bytes):", ulRandomLen);
-     for (CK_ULONG i = 0; i < ulRandomLen; i++) {
-         LT_PKCS11_LOG("0x%02X", pRandomData[i]);
-     }
-     
-     LT_PKCS11_LOG("C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
-     return CKR_OK;
- }
+        
+        /* Request random bytes from the chip */
+        lt_ret_t ret = lt_random_value_get(&pkcs11_ctx.lt_handle, ptr, chunk_size);
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("Failed to get random bytes: %s", lt_ret_verbose(ret));
+            return CKR_DEVICE_ERROR;
+        }
+        
+        /* Move pointer forward and decrease remaining count */
+        ptr += chunk_size;
+        remaining -= chunk_size;
+    }
+    
+    LT_PKCS11_LOG("Random bytes (%lu bytes):", ulRandomLen);
+    for (CK_ULONG i = 0; i < ulRandomLen; i++) {
+        LT_PKCS11_LOG("0x%02X", pRandomData[i]);
+    }
+    
+    LT_PKCS11_LOG("C_GenerateRandom OK (generated %lu bytes from TROPIC01 hardware RNG)", ulRandomLen);
+    return CKR_OK;
+}
  
 CK_RV C_SeedRandom(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
 {
     LT_PKCS11_LOG("C_SeedRandom (hSession=0x%lx, pSeed=%p, ulSeedLen=%lu)",
-         hSession, pSeed, ulSeedLen);
+                  hSession, pSeed, ulSeedLen);
      
-     /* Library must be initialized */
-     if (!pkcs11_ctx.initialized) {
-         LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
-         return CKR_CRYPTOKI_NOT_INITIALIZED;
-     }
-     
-     /* Session must be open */
-     if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
-         LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
-         return CKR_SESSION_HANDLE_INVALID;
-     }
-     
-     /* Validate parameters */
-     if (!pSeed) {
-         LT_PKCS11_LOG("pSeed is NULL: CKR_ARGUMENTS_BAD");
-         return CKR_ARGUMENTS_BAD;
-     }
-     
-     /* 
-      * Per PKCS#11 spec: TROPIC01 has a true hardware RNG that uses physical
-      * entropy sources (thermal noise). It does not use or need external seeding.
-      * Return CKR_RANDOM_SEED_NOT_SUPPORTED to indicate this.
-      */
-     LT_PKCS11_LOG("C_SeedRandom: HWRNG does not use seed: CKR_RANDOM_SEED_NOT_SUPPORTED");
-     return CKR_RANDOM_SEED_NOT_SUPPORTED;
+    /* Library must be initialized */
+    if (!pkcs11_ctx.initialized) {
+        LT_PKCS11_LOG("Library not initialized: CKR_CRYPTOKI_NOT_INITIALIZED");
+        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    }
+    
+    /* Session must be open */
+    if (!pkcs11_ctx.session_open || hSession != pkcs11_ctx.session_handle) {
+        LT_PKCS11_LOG("Invalid session: CKR_SESSION_HANDLE_INVALID");
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    
+    /* Validate parameters */
+    if (!pSeed) {
+        LT_PKCS11_LOG("pSeed is NULL: CKR_ARGUMENTS_BAD");
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    // TROPIC01 has a true hardware RNG that does not suppor seeding
+    LT_PKCS11_LOG("C_SeedRandom: HWRNG does not use seed: CKR_RANDOM_SEED_NOT_SUPPORTED");
+    return CKR_RANDOM_SEED_NOT_SUPPORTED;
 }
-
-
-/* ---------------------------------------------------------------------------
- * SIGNING FUNCTIONS
- * --------------------------------------------------------------------------
- * 
- * These functions implement ECDSA (P256) and EdDSA (Ed25519) signing using the
- * ECC private keys stored in TROPIC01's secure key slots.
- * 
- * The private keys never leave the chip - signing is performed inside TROPIC01.
- */
 
 CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
     LT_PKCS11_LOG("C_SignInit (hSession=0x%lx, pMechanism=%p, hKey=0x%lx)",
-        hSession, pMechanism, hKey);
+                  hSession, pMechanism, hKey);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1462,7 +1424,7 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
     
     LT_PKCS11_LOG("C_SignInit OK (slot=%u, mechanism=0x%lx, curve=%d)", 
         slot, pMechanism->mechanism, curve);
-        
+
     return CKR_OK;
 }
 
@@ -1542,20 +1504,6 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
     return CKR_OK;
 }
 
-
-/* ---------------------------------------------------------------------------
- * KEY GENERATION FUNCTIONS
- * --------------------------------------------------------------------------
- * 
- * Generate ECC key pairs (P-256 or Ed25519) in TROPIC01's secure key slots.
- * Private keys never leave the chip - only the public key is readable.
- */
-
-/* ---------------------------------------------------------------------------
- * MECHANISM FUNCTIONS
- * --------------------------------------------------------------------------
- */
-
 /* Supported mechanisms */
 static const CK_MECHANISM_TYPE supported_mechanisms[] = {
     CKM_EC_KEY_PAIR_GEN,  /* ECC key generation */
@@ -1568,7 +1516,7 @@ CK_RV C_GetMechanismList(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList
                          CK_ULONG_PTR pulCount)
 {
     LT_PKCS11_LOG("C_GetMechanismList (slotID=%lu, pMechanismList=%p, pulCount=%p)",
-        slotID, pMechanismList, pulCount);
+                  slotID, pMechanismList, pulCount);
     
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -1604,7 +1552,7 @@ CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
                          CK_MECHANISM_INFO_PTR pInfo)
 {
     LT_PKCS11_LOG("C_GetMechanismInfo (slotID=%lu, type=0x%lx, pInfo=%p)",
-        slotID, type, pInfo);
+                  slotID, type, pInfo);
     
     if (!pkcs11_ctx.initialized) {
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -1671,7 +1619,7 @@ CK_RV C_Login(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
               CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen)
 {
     LT_PKCS11_LOG("C_Login (hSession=0x%lx, userType=%lu, pPin=%p, ulPinLen=%lu)",
-        hSession, userType, pPin, ulPinLen);
+                  hSession, userType, pPin, ulPinLen);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
@@ -1723,14 +1671,6 @@ CK_RV C_Logout(CK_SESSION_HANDLE hSession)
 }
 
 
-/* ---------------------------------------------------------------------------
- * KEY GENERATION FUNCTIONS
- * --------------------------------------------------------------------------
- * 
- * Generate ECC key pairs (P-256 or Ed25519) in TROPIC01's secure key slots.
- * Private keys never leave the chip - only the public key is readable.
- */
-
 /* DER-encoded OID for secp256r1 (P-256): 1.2.840.10045.3.1.7 */
 static const CK_BYTE OID_SECP256R1[] = {
     0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07
@@ -1747,7 +1687,12 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
                         CK_ATTRIBUTE_PTR pPrivateKeyTemplate, CK_ULONG ulPrivateKeyAttributeCount,
                         CK_OBJECT_HANDLE_PTR phPublicKey, CK_OBJECT_HANDLE_PTR phPrivateKey)
 {
-    LT_PKCS11_LOG("C_GenerateKeyPair (hSession=0x%lx, pMechanism=%p)", hSession, pMechanism);
+    LT_PKCS11_LOG("C_GenerateKeyPair (hSession=0x%lx, pMechanism=%p, pPublicKeyTemplate=%p, \
+                                      ulPublicKeyAttributeCount=%lu, pPrivateKeyTemplate=%p, \
+                                      ulPrivateKeyAttributeCount=%lu, phPublicKey=%p, \
+                                      phPrivateKey=%p)", hSession, pMechanism, pPublicKeyTemplate,
+                                      ulPublicKeyAttributeCount, pPrivateKeyTemplate, 
+                                      ulPrivateKeyAttributeCount, phPublicKey, phPrivateKey);
     
     /* Library must be initialized */
     if (!pkcs11_ctx.initialized) {
