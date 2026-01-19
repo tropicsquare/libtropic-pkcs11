@@ -249,13 +249,23 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
 
     /* Read firmware versions from chip */
     uint8_t fw_ver[4] = {0};
-    if (lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver) == LT_OK) {
+
+    lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
+    if (ret == LT_OK) {
         pInfo->firmwareVersion.major = fw_ver[3];
         pInfo->firmwareVersion.minor = fw_ver[2];
+    } else {
+        LT_PKCS11_LOG("lt_get_info_riscv_fw_ver failed with: %s", lt_ret_verbose(ret));
+        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
-    if (lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver) == LT_OK) {
+
+    ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
+    if (ret == LT_OK) {
         pInfo->hardwareVersion.major = fw_ver[3];
         pInfo->hardwareVersion.minor = fw_ver[2];
+    } else {
+        LT_PKCS11_LOG("lt_get_info_spect_fw_ver failed with: %s", lt_ret_verbose(ret));
+        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
 
     LT_PKCS11_RETURN(CKR_OK);
