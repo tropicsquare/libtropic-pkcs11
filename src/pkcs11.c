@@ -65,9 +65,6 @@ typedef struct {
     lt_dev_unix_usb_dongle_t lt_device;
     CK_SESSION_HANDLE session_handle;
 
-    /* PKCS#11 function list - must persist for lifetime of library */
-    CK_FUNCTION_LIST functionList;
-
     /* C_FindObjects state */
     CK_BBOOL find_active;
     CK_OBJECT_CLASS find_class;
@@ -1754,175 +1751,124 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
     LT_PKCS11_RETURN(CKR_OK);
 }
 
+/**************************************************************************************************
+* FUNCTION LIST
+* 
+* This structure contains pointers to ALL PKCS#11 functions.
+* 
+* Fields set to NULL indicate unimplemented functions.
+* When called, the application receives CKR_FUNCTION_NOT_SUPPORTED.
+***************************************************************************************************/
+static const CK_FUNCTION_LIST pkcs11_fnc_list = {
+    
+    /* Cryptoki version this library implements */
+    .version = {2, 40}, 
+
+    /* GENERAL PURPOSE FUNCTIONS */
+    .C_Initialize = C_Initialize,               /* Initialize library */
+    .C_Finalize = C_Finalize,                   /* Shut down library */
+    .C_GetInfo = C_GetInfo,                     /* Get library info */
+    .C_GetFunctionList = C_GetFunctionList,     /* Get this function list */
+
+    /* SLOT AND TOKEN MANAGEMENT */
+    .C_GetSlotList = C_GetSlotList,             /* List available slots */
+    .C_GetSlotInfo = C_GetSlotInfo,             /* Get info about a slot */
+    .C_GetTokenInfo = C_GetTokenInfo,           /* Get info about token in slot */
+    .C_GetMechanismList = C_GetMechanismList,   /* List supported mechanisms */
+    .C_GetMechanismInfo = C_GetMechanismInfo,   /* Get mechanism info */
+    .C_InitToken = NULL,                        /* Initialize a token (not implemented) */
+    .C_InitPIN = NULL,                          /* Initialize user PIN (not implemented) */
+    .C_SetPIN = NULL,                           /* Change user PIN (not implemented) */
+
+    /* SESSION MANAGEMENT */
+    .C_OpenSession = C_OpenSession,             /* Open a session */
+    .C_CloseSession = C_CloseSession,           /* Close a session */
+    .C_CloseAllSessions = NULL,                 /* Close all sessions (not implemented) */
+    .C_GetSessionInfo = C_GetSessionInfo,       /* Get session info */
+    .C_GetOperationState = NULL,                /* Get crypto operation state (not implemented) */
+    .C_SetOperationState = NULL,                /* Set crypto operation state (not implemented) */
+    .C_Login = C_Login,                         /* No-op login (auth via pairing keys) */
+    .C_Logout = C_Logout,                       /* No-op logout */
+
+    /* OBJECT MANAGEMENT */
+    .C_CreateObject = C_CreateObject,           /* Create data object in R-MEM */
+    .C_CopyObject = NULL,                       /* Copy an object (not implemented) */
+    .C_DestroyObject = C_DestroyObject,         /* Erase data from R-MEM */
+    .C_GetObjectSize = NULL,                    /* Get object size (not implemented) */
+    .C_GetAttributeValue = C_GetAttributeValue, /* Read data from R-MEM */
+    .C_SetAttributeValue = NULL,                /* Set object attributes (not implemented) */
+    .C_FindObjectsInit = C_FindObjectsInit,     /* Start R-MEM enumeration */
+    .C_FindObjects = C_FindObjects,             /* Find non-empty R-MEM slots */
+    .C_FindObjectsFinal = C_FindObjectsFinal,   /* End R-MEM enumeration */
+
+    /* ENCRYPTION FUNCTIONS */
+    .C_EncryptInit = NULL,                      /* Initialize encryption (not implemented) */
+    .C_Encrypt = NULL,                          /* Encrypt data (not implemented) */
+    .C_EncryptUpdate = NULL,                    /* Continue multi-part encryption (not implemented) */
+    .C_EncryptFinal = NULL,                     /* Finish multi-part encryption (not implemented) */
+
+    /* DECRYPTION FUNCTIONS */
+    .C_DecryptInit = NULL,                      /* Initialize decryption (not implemented) */
+    .C_Decrypt = NULL,                          /* Decrypt data (not implemented) */
+    .C_DecryptUpdate = NULL,                    /* Continue multi-part decryption (not implemented) */
+    .C_DecryptFinal = NULL,                     /* Finish multi-part decryption (not implemented) */
+
+    /* MESSAGE DIGESTING (HASHING) FUNCTIONS */
+    .C_DigestInit = NULL,                       /* Initialize digest (not implemented) */
+    .C_Digest = NULL,                           /* Compute digest (not implemented) */
+    .C_DigestUpdate = NULL,                     /* Continue multi-part digest (not implemented) */
+    .C_DigestKey = NULL,                        /* Include key in digest (not implemented) */
+    .C_DigestFinal = NULL,                      /* Finish multi-part digest (not implemented) */
+
+    /* SIGNING AND MACING FUNCTIONS */
+    .C_SignInit = C_SignInit,                   /* Initialize ECDSA/EdDSA signing */
+    .C_Sign = C_Sign,                           /* Perform signature on TROPIC01 */
+    .C_SignUpdate = NULL,                       /* Continue multi-part signing (not implemented) */
+    .C_SignFinal = NULL,                        /* Finish multi-part signing (not implemented) */
+    .C_SignRecoverInit = NULL,                  /* Init signing with data recovery (not implemented) */
+    .C_SignRecover = NULL,                      /* Sign with data recovery (not implemented) */
+
+    /* SIGNATURE VERIFICATION FUNCTIONS */
+    .C_VerifyInit = NULL,                       /* Initialize verification (not implemented) */
+    .C_Verify = NULL,                           /* Verify signature (not implemented) */
+    .C_VerifyUpdate = NULL,                     /* Continue multi-part verification (not implemented) */
+    .C_VerifyFinal = NULL,                      /* Finish multi-part verification (not implemented) */
+    .C_VerifyRecoverInit = NULL,                /* Init verify with data recovery (not implemented) */
+    .C_VerifyRecover = NULL,                    /* Verify with data recovery (not implemented) */
+
+    /* DUAL-FUNCTION CRYPTOGRAPHIC OPERATIONS */
+    .C_DigestEncryptUpdate = NULL,              /* Digest + encrypt combined (not implemented) */
+    .C_DecryptDigestUpdate = NULL,              /* Decrypt + digest combined (not implemented) */
+    .C_SignEncryptUpdate = NULL,                /* Sign + encrypt combined (not implemented) */
+    .C_DecryptVerifyUpdate = NULL,              /* Decrypt + verify combined (not implemented) */
+
+    /* KEY MANAGEMENT FUNCTIONS */
+    .C_GenerateKey = NULL,                      /* Generate symmetric key (not implemented) */
+    .C_GenerateKeyPair = C_GenerateKeyPair,     /* Generate ECC key pair (P-256 or Ed25519) */
+    .C_WrapKey = NULL,                          /* Wrap (encrypt) a key (not implemented) */
+    .C_UnwrapKey = NULL,                        /* Unwrap (decrypt) a key (not implemented) */
+    .C_DeriveKey = NULL,                        /* Derive a key from another (not implemented) */
+
+    /* RANDOM NUMBER GENERATION - OUR MAIN FEATURE! */
+    .C_SeedRandom = C_SeedRandom,               /* Returns CKR_RANDOM_SEED_NOT_SUPPORTED (HWRNG) */
+    .C_GenerateRandom = C_GenerateRandom,       /* *** GENERATE RANDOM BYTES FROM TROPIC01 *** */
+
+    /* PARALLEL FUNCTION MANAGEMENT (DEPRECATED) */
+    .C_GetFunctionStatus = NULL,                /* Get parallel operation status (deprecated) */
+    .C_CancelFunction = NULL,                   /* Cancel parallel operation (deprecated) */
+    .C_WaitForSlotEvent = NULL,                 /* Wait for slot events (not implemented) */
+};
+
 CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList)
 {
     LT_PKCS11_LOG("(ppFunctionList=0x%p)", ppFunctionList);
-
-    static CK_BBOOL functionList_initialized = CK_FALSE;
     
     /* Validate parameter */
     if (!ppFunctionList) {
         LT_PKCS11_RETURN(CKR_ARGUMENTS_BAD);
     }
-    
-    /* Initialize function list once (lazy initialization) */
-    if (!functionList_initialized) {
-        /* -----------------------------------------------------------------------
-         * THE FUNCTION LIST
-         * -----------------------------------------------------------------------
-         * 
-         * This structure contains pointers to ALL PKCS#11 functions.
-         * The structure is defined in pkcs11.h.
-         * 
-         * We use designated initializers (.member = value) for clarity and safety.
-         * This ensures fields are set correctly regardless of declaration order.
-         * 
-         * Fields set to NULL indicate unimplemented functions. When called,
-         * the application receives CKR_FUNCTION_NOT_SUPPORTED.
-         */
-        pkcs11_ctx.functionList = (CK_FUNCTION_LIST){
-         /* Cryptoki version this library implements */
-         .version = {2, 40},  /* PKCS#11 version 2.40 */
-         
-         /* =====================================================================
-          * GENERAL PURPOSE FUNCTIONS
-          * These are required for basic library operation.
-          * ===================================================================== */
-         .C_Initialize = C_Initialize,           /* Initialize library */
-         .C_Finalize = C_Finalize,               /* Shut down library */
-         .C_GetInfo = C_GetInfo,                 /* Get library info */
-         .C_GetFunctionList = C_GetFunctionList, /* Get this function list */
-         
-         /* =====================================================================
-          * SLOT AND TOKEN MANAGEMENT
-          * Functions for discovering and querying slots/tokens.
-          * ===================================================================== */
-         .C_GetSlotList = C_GetSlotList,         /* List available slots */
-         .C_GetSlotInfo = C_GetSlotInfo,         /* Get info about a slot */
-         .C_GetTokenInfo = C_GetTokenInfo,       /* Get info about token in slot */
-         .C_GetMechanismList = C_GetMechanismList, /* List supported mechanisms */
-         .C_GetMechanismInfo = C_GetMechanismInfo, /* Get mechanism info */
-         .C_InitToken = NULL,                    /* Initialize a token (not implemented) */
-         .C_InitPIN = NULL,                      /* Initialize user PIN (not implemented) */
-         .C_SetPIN = NULL,                       /* Change user PIN (not implemented) */
-         
-         /* =====================================================================
-          * SESSION MANAGEMENT
-          * Functions for managing sessions with tokens.
-          * ===================================================================== */
-         .C_OpenSession = C_OpenSession,         /* Open a session */
-         .C_CloseSession = C_CloseSession,       /* Close a session */
-         .C_CloseAllSessions = NULL,             /* Close all sessions (not implemented) */
-         .C_GetSessionInfo = C_GetSessionInfo,   /* Get session info */
-         .C_GetOperationState = NULL,            /* Get crypto operation state (not implemented) */
-         .C_SetOperationState = NULL,            /* Set crypto operation state (not implemented) */
-         .C_Login = C_Login,                     /* No-op login (auth via pairing keys) */
-         .C_Logout = C_Logout,                   /* No-op logout */
-         
-        /* =====================================================================
-         * OBJECT MANAGEMENT
-         * Functions for managing objects (keys, certs, data) on the token.
-         * CKO_DATA objects are stored in TROPIC01's R-MEM (512 slots, 1-444 bytes each)
-         * ===================================================================== */
-        .C_CreateObject = C_CreateObject,       /* Create data object in R-MEM */
-        .C_CopyObject = NULL,                   /* Copy an object (not implemented) */
-        .C_DestroyObject = C_DestroyObject,     /* Erase data from R-MEM */
-        .C_GetObjectSize = NULL,                /* Get object size (not implemented) */
-        .C_GetAttributeValue = C_GetAttributeValue, /* Read data from R-MEM */
-        .C_SetAttributeValue = NULL,            /* Set object attributes (not implemented) */
-        .C_FindObjectsInit = C_FindObjectsInit, /* Start R-MEM enumeration */
-        .C_FindObjects = C_FindObjects,         /* Find non-empty R-MEM slots */
-        .C_FindObjectsFinal = C_FindObjectsFinal, /* End R-MEM enumeration */
-         
-         /* =====================================================================
-          * ENCRYPTION FUNCTIONS
-          * Functions for encrypting data.
-          * ===================================================================== */
-         .C_EncryptInit = NULL,                  /* Initialize encryption (not implemented) */
-         .C_Encrypt = NULL,                      /* Encrypt data (not implemented) */
-         .C_EncryptUpdate = NULL,                /* Continue multi-part encryption (not implemented) */
-         .C_EncryptFinal = NULL,                 /* Finish multi-part encryption (not implemented) */
-         
-         /* =====================================================================
-          * DECRYPTION FUNCTIONS
-          * Functions for decrypting data.
-          * ===================================================================== */
-         .C_DecryptInit = NULL,                  /* Initialize decryption (not implemented) */
-         .C_Decrypt = NULL,                      /* Decrypt data (not implemented) */
-         .C_DecryptUpdate = NULL,                /* Continue multi-part decryption (not implemented) */
-         .C_DecryptFinal = NULL,                 /* Finish multi-part decryption (not implemented) */
-         
-         /* =====================================================================
-          * MESSAGE DIGESTING (HASHING) FUNCTIONS
-          * Functions for computing hashes/digests of data.
-          * ===================================================================== */
-         .C_DigestInit = NULL,                   /* Initialize digest (not implemented) */
-         .C_Digest = NULL,                       /* Compute digest (not implemented) */
-         .C_DigestUpdate = NULL,                 /* Continue multi-part digest (not implemented) */
-         .C_DigestKey = NULL,                    /* Include key in digest (not implemented) */
-         .C_DigestFinal = NULL,                  /* Finish multi-part digest (not implemented) */
-         
-        /* =====================================================================
-         * SIGNING AND MACING FUNCTIONS
-         * Functions for creating digital signatures.
-         * ECDSA (P256) and EdDSA (Ed25519) supported via TROPIC01.
-         * ===================================================================== */
-        .C_SignInit = C_SignInit,               /* Initialize ECDSA/EdDSA signing */
-        .C_Sign = C_Sign,                       /* Perform signature on TROPIC01 */
-        .C_SignUpdate = NULL,                   /* Continue multi-part signing (not implemented) */
-        .C_SignFinal = NULL,                    /* Finish multi-part signing (not implemented) */
-        .C_SignRecoverInit = NULL,              /* Init signing with data recovery (not implemented) */
-        .C_SignRecover = NULL,                  /* Sign with data recovery (not implemented) */
-         
-         /* =====================================================================
-          * SIGNATURE VERIFICATION FUNCTIONS
-          * Functions for verifying digital signatures.
-          * ===================================================================== */
-         .C_VerifyInit = NULL,                   /* Initialize verification (not implemented) */
-         .C_Verify = NULL,                       /* Verify signature (not implemented) */
-         .C_VerifyUpdate = NULL,                 /* Continue multi-part verification (not implemented) */
-         .C_VerifyFinal = NULL,                  /* Finish multi-part verification (not implemented) */
-         .C_VerifyRecoverInit = NULL,            /* Init verify with data recovery (not implemented) */
-         .C_VerifyRecover = NULL,                /* Verify with data recovery (not implemented) */
-         
-         /* =====================================================================
-          * DUAL-FUNCTION CRYPTOGRAPHIC OPERATIONS
-          * Combined operations for efficiency.
-          * ===================================================================== */
-         .C_DigestEncryptUpdate = NULL,          /* Digest + encrypt combined (not implemented) */
-         .C_DecryptDigestUpdate = NULL,          /* Decrypt + digest combined (not implemented) */
-         .C_SignEncryptUpdate = NULL,            /* Sign + encrypt combined (not implemented) */
-         .C_DecryptVerifyUpdate = NULL,          /* Decrypt + verify combined (not implemented) */
-         
-         /* =====================================================================
-          * KEY MANAGEMENT FUNCTIONS
-          * Functions for key generation and key wrapping.
-          * ===================================================================== */
-         .C_GenerateKey = NULL,                  /* Generate symmetric key (not implemented) */
-         .C_GenerateKeyPair = C_GenerateKeyPair, /* Generate ECC key pair (P-256 or Ed25519) */
-         .C_WrapKey = NULL,                      /* Wrap (encrypt) a key (not implemented) */
-         .C_UnwrapKey = NULL,                    /* Unwrap (decrypt) a key (not implemented) */
-         .C_DeriveKey = NULL,                    /* Derive a key from another (not implemented) */
-         
-         /* =====================================================================
-          * RANDOM NUMBER GENERATION - OUR MAIN FEATURE!
-          * ===================================================================== */
-         .C_SeedRandom = C_SeedRandom,           /* Returns CKR_RANDOM_SEED_NOT_SUPPORTED (HWRNG) */
-         .C_GenerateRandom = C_GenerateRandom,   /* *** GENERATE RANDOM BYTES FROM TROPIC01 *** */
-         
-         /* =====================================================================
-          * PARALLEL FUNCTION MANAGEMENT (DEPRECATED)
-          * Legacy functions, rarely used.
-          * ===================================================================== */
-         .C_GetFunctionStatus = NULL,            /* Get parallel operation status (deprecated) */
-         .C_CancelFunction = NULL,               /* Cancel parallel operation (deprecated) */
-         .C_WaitForSlotEvent = NULL,             /* Wait for slot events (not implemented) */
-        };
-        functionList_initialized = CK_TRUE;
-    }
-    
-    /* Return pointer to our function list from context */
-    *ppFunctionList = &pkcs11_ctx.functionList;
+
+    *ppFunctionList = (CK_FUNCTION_LIST_PTR)(&pkcs11_fnc_list);
     
     LT_PKCS11_RETURN(CKR_OK);
 }
