@@ -247,22 +247,22 @@ CK_RV C_GetSlotInfo(CK_SLOT_ID slotID, CK_SLOT_INFO_PTR pInfo)
     uint8_t fw_ver[4] = {0};
 
     lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-    if (ret == LT_OK) {
-        pInfo->firmwareVersion.major = fw_ver[3];
-        pInfo->firmwareVersion.minor = fw_ver[2];
-    } else {
+    if (ret != LT_OK) {
         LT_PKCS11_LOG("lt_get_info_riscv_fw_ver failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
+    
+    pInfo->firmwareVersion.major = fw_ver[3];
+    pInfo->firmwareVersion.minor = fw_ver[2];
 
     ret = lt_get_info_spect_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-    if (ret == LT_OK) {
-        pInfo->hardwareVersion.major = fw_ver[3];
-        pInfo->hardwareVersion.minor = fw_ver[2];
-    } else {
+    if (ret != LT_OK) {
         LT_PKCS11_LOG("lt_get_info_spect_fw_ver failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
+    
+    pInfo->hardwareVersion.major = fw_ver[3];
+    pInfo->hardwareVersion.minor = fw_ver[2];
 
     LT_PKCS11_RETURN(CKR_OK);
 }
@@ -282,19 +282,8 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     if (!pInfo) {
         LT_PKCS11_RETURN(CKR_ARGUMENTS_BAD);
     }
-    
-    /* Get chip ID to verify token is present and get token info */
-    struct lt_chip_id_t chip_id = {0};
-    lt_ret_t ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
-    if (ret != LT_OK) {
-        LT_PKCS11_LOG("lt_get_info_chip_id failed with: %s", lt_ret_verbose(ret));
-        LT_PKCS11_RETURN(CKR_TOKEN_NOT_PRESENT);
-    }
-    
-    /* Fill in token information */
+        
     memset(pInfo, 0, sizeof(CK_TOKEN_INFO));
-    
-    /* Manufacturer is always TropicSquare */
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
     
     /* Token capabilities - mark as fully initialized with RNG */
@@ -318,15 +307,23 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     
     /* Get firmware version */
     uint8_t fw_ver[4] = {0};
-    ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
-    if (ret == LT_OK) {
-        pInfo->firmwareVersion.major = fw_ver[3];
-        pInfo->firmwareVersion.minor = fw_ver[2];
-    } else {
+    lt_ret_t ret = lt_get_info_riscv_fw_ver(&pkcs11_ctx.lt_handle, fw_ver);
+    if (ret != LT_OK) {
         LT_PKCS11_LOG("lt_get_info_riscv_fw_ver failed with: %s", lt_ret_verbose(ret));
         LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
     }
-    
+
+    pInfo->firmwareVersion.major = fw_ver[3];
+    pInfo->firmwareVersion.minor = fw_ver[2];
+
+    /* Get chip ID and get token info */
+    struct lt_chip_id_t chip_id = {0};
+    ret = lt_get_info_chip_id(&pkcs11_ctx.lt_handle, &chip_id);
+    if (ret != LT_OK) {
+        LT_PKCS11_LOG("lt_get_info_chip_id failed with: %s", lt_ret_verbose(ret));
+        LT_PKCS11_RETURN(CKR_TOKEN_NOT_PRESENT);
+    }
+
     /* Hardware version from chip_id_ver array [major.minor.patch.build] */
     pInfo->hardwareVersion.major = chip_id.chip_id_ver[0];
     pInfo->hardwareVersion.minor = chip_id.chip_id_ver[1];
