@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the PKCS#11 module from source with logging enabled
-# Usage: ./Build.sh
+# Usage: ./Build_Debug.sh
 #
 # Build steps:
 #   1. Remove existing build directory for clean build
