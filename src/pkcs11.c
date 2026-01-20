@@ -57,7 +57,7 @@ extern uint8_t sh0pub[];
     (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_ECC_PUBKEY && \
      PKCS11_HANDLE_GET_SLOT(h) <= TR01_ECC_SLOT_31)
 
-#define TRIM_LENGTH(v, len) ((v > len) ? v : len)
+#define TRIM_LENGTH(v, maxlen) ((v < maxlen) ? v : maxlen)
 
 /* Module context - all global state in one place */
 typedef struct {
