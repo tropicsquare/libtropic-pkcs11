@@ -26,9 +26,6 @@ if [ ! -f "$DATA_FILE" ]; then
     echo "Sample data for slot $SLOT @ $(date +%s)" > "$DATA_FILE"
 fi
 
-echo "Erasing slot $SLOT"
-pkcs11-tool --module "$MODULE" --delete-object --type data --label "$SLOT" 2>/dev/null || true
-
 echo "Writing to slot $SLOT from $DATA_FILE"
 pkcs11-tool --module "$MODULE" --write-object "$DATA_FILE" --type data --label "$SLOT"
 
