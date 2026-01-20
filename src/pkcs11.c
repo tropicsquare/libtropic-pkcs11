@@ -1184,7 +1184,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
             (*pulObjectCount)++;
 
-            LT_PKCS11_LOG("Found USER-DATA in R-Memory slot: %u", slot);
+            printf("Found USER-DATA in R-Memory slot: %u\n", slot);
         }
     }
 
@@ -1220,8 +1220,8 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             if (!pkcs11_ctx.find_class_set || pkcs11_ctx.find_class == CKO_PRIVATE_KEY) {
                 phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot);
                 (*pulObjectCount)++;
-                LT_PKCS11_LOG("Found PRIVATE KEY in ECC slot %u (handle=0x%lx, curve=%d)",
-                                slot, phObject[*pulObjectCount - 1], curve);
+                printf("Found PRIVATE KEY in ECC slot %u (handle=0x%lx, curve=%d)\n",
+                        slot, phObject[*pulObjectCount - 1], curve);
             }
 
             if (*pulObjectCount >= ulMaxObjectCount) {
@@ -1232,7 +1232,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             if (!pkcs11_ctx.find_class_set || pkcs11_ctx.find_class == CKO_PUBLIC_KEY) {
                 phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot);
                 (*pulObjectCount)++;
-                LT_PKCS11_LOG("Found PUBLIC KEY in ECC slot %u (handle=0x%lx, curve=%d)",
+                printf("Found PUBLIC KEY in ECC slot %u (handle=0x%lx, curve=%d)\n",
                     slot, phObject[*pulObjectCount - 1], curve);
             }
         }
