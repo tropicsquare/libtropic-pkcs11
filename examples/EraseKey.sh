@@ -17,6 +17,7 @@ source "$SCRIPT_DIR/common.sh"
 require_module
 
 SLOT="${SLOT:-24}"
+SLOT_HEX=$(printf "%02x" "$SLOT")
 
-echo "Erasing ECC key in slot $SLOT"
-pkcs11-tool --module "$MODULE" --delete-object --type privkey --label "$SLOT" 2>/dev/null || echo "(slot $SLOT was empty)"
+echo "Erasing ECC key in ECC slot $SLOT ($SLOT_HEX)"
+pkcs11-tool --module "$MODULE" --delete-object --type privkey --id "$SLOT_HEX"

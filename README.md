@@ -96,41 +96,34 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so --generate-random 32 \
 
 ### Store User Data
 
-Write, read, and erase user data in TROPIC01's secure R-MEM storage (512 slots, 0-511):
+Write, read, and erase user data in TROPIC01's secure R-Memory storage (512 slots, 0-511):
 
 ```bash
-# Store data in slot 60
-echo "My secret data" > /tmp/data.bin
-./examples/StoreUserData.sh   # Uses SLOT=60 by default
-
-# Or directly:
+# Store data to R-Memory slot 60:
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --write-object /tmp/data.bin --type data --label "60"
 
-# Read data back
+# Read data back from R-Memory slot 60:
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --read-object --type data --label "60" -o /tmp/read.bin && xxd /tmp/read.bin
 
-# Erase data
+# Erase data in R-Memory slot 60:
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type data --label "60"
 ```
 
 ### Generate ECC Key Pair
 
-Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC slots (0-31):
+Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC key slots (0-31):
 
 ```bash
-# Generate P-256 key in slot 24
-SLOT=24 ./examples/GenerateKey.sh
-
-# Or directly:
+# Generate P-256 key in ECC Key slot 24 (slot index must be converted to hexadecimal)
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
-    --keypairgen --key-type EC:secp256r1 --label "24"
+    --keypairgen --key-type EC:secp256r1 --id "18"
 
-# For Ed25519:
+# Generate Ed25519 key in ECC Key slot 5 (slot index must be converted to hexadecimal)
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
-    --keypairgen --key-type EC:edwards25519 --label "5"
+    --keypairgen --key-type EC:edwards25519 --id "5"
 ```
 
 ### Sign Data
@@ -159,12 +152,9 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so \
 ### Erase ECC Key
 
 ```bash
-# Erase key from slot 24
-SLOT=24 ./examples/EraseKey.sh
-
-# Or directly:
+# Erase ECC Key slot 24 (slot index must be converted to hexadecimal)
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
-    --delete-object --type privkey --label "24"
+    --delete-object --type privkey --id "18"
 ```
 
 ### Run All Tests

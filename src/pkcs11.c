@@ -509,7 +509,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
             break;
 
         case CKA_LABEL:
-            /* Use CKA_LABEL as slot number */
+            /* Use CKA_LABEL as slot number for User Data (R-Mem)*/
             if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
                 char temp[16] = {0};
                 memcpy(temp, pTemplate[i].pValue, TRIM_LENGTH(pTemplate[i].ulValueLen, 15));
@@ -540,7 +540,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
     }
 
-    /* Slot must be specified via CKA_LABEL */
+    /* Slot must be specified */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
         LT_PKCS11_RETURN(CKR_TEMPLATE_INCOMPLETE);
     }
@@ -766,16 +766,13 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         uint16_t pubkey_len = (curve == TR01_CURVE_P256) ? TR01_CURVE_P256_PUBKEY_LEN :
                                                            TR01_CURVE_ED25519_PUBKEY_LEN;
 
-        /* Generate label for this key */
-        /* Label is just the slot number (consistent with --label usage) */
-        char key_label[16];
-        snprintf(key_label, sizeof(key_label), "%u", slot);
-        CK_ULONG key_label_len = strlen(key_label);
 
         /* Fill in requested attributes for ECC key */
         for (CK_ULONG i = 0; i < ulCount; i++) {
             switch (pTemplate[i].type) {
-            case CKA_CLASS: {
+
+            case CKA_CLASS:
+            {
                 CK_OBJECT_CLASS obj_class = is_private ? CKO_PRIVATE_KEY : CKO_PUBLIC_KEY;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
@@ -788,18 +785,22 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_LABEL:
+
+            case CKA_ID:
+                /* Generate id for this key */
                 if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = key_label_len;
-                } else if (pTemplate[i].ulValueLen >= key_label_len) {
-                    memcpy(pTemplate[i].pValue, key_label, key_label_len);
-                    pTemplate[i].ulValueLen = key_label_len;
+                    pTemplate[i].ulValueLen = 1;
+                } else if (pTemplate[i].ulValueLen >= 1) {
+                    *((uint8_t*)pTemplate[i].pValue) = slot;
+                    pTemplate[i].ulValueLen = 1;
                 } else {
                     pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                     rv = CKR_BUFFER_TOO_SMALL;
                 }
                 break;
-            case CKA_KEY_TYPE: {
+
+            case CKA_KEY_TYPE:
+            {
                 CK_KEY_TYPE key_type = (curve == TR01_CURVE_P256) ? CKK_EC : CKK_EC_EDWARDS;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
@@ -812,19 +813,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_ID: {
-                uint8_t id = (uint8_t)slot;
-                if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = sizeof(uint8_t);
-                } else if (pTemplate[i].ulValueLen >= sizeof(uint8_t)) {
-                    memcpy(pTemplate[i].pValue, &id, sizeof(uint8_t));
-                    pTemplate[i].ulValueLen = sizeof(uint8_t);
-                } else {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_BUFFER_TOO_SMALL;
-                }
-                break;
-            }
+
             case CKA_VALUE:
                 /* For public keys, return the public key value */
                 /* For private keys, this is sensitive - return CKR_ATTRIBUTE_SENSITIVE per PKCS#11 spec */
@@ -1084,7 +1073,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
                    pTemplate[i].pValue &&
                    pTemplate[i].ulValueLen > 0) {
 
-            /* Parse CKA_LABEL as slot number (decimal string) - preferred method */
+            /* Parse CKA_LABEL as slot number for R-Memory slots */
             char temp[16] = {0};
             CK_ULONG copy_len = TRIM_LENGTH(pTemplate[i].ulValueLen, 15);
             memcpy(temp, pTemplate[i].pValue, copy_len);
@@ -1098,11 +1087,11 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
                    pTemplate[i].ulValueLen > 0 &&
                    !pkcs11_ctx.find_slot_set) {
 
-            /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
-            uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-            pkcs11_ctx.find_slot = (CK_ULONG)id_bytes[0];
+            /* Parse CKA_ID as slot number for ECC key slots */
+            pkcs11_ctx.find_slot = *((uint8_t*)pTemplate[i].pValue);
             pkcs11_ctx.find_slot_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], pkcs11_ctx.find_slot);
+
+            LT_PKCS11_LOG("  Filter CKA_ID = %02lu", pkcs11_ctx.find_slot);
         }
     }
 
@@ -1729,41 +1718,40 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
     CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
 
     /* Check public key template for EC_PARAMS (curve) and LABEL (slot) */
+    printf("ulPublicKeyAttributeCount: %lu\n", ulPublicKeyAttributeCount);
     for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++) {
         if (pPublicKeyTemplate[i].type == CKA_EC_PARAMS && pPublicKeyTemplate[i].pValue) {
+
             /* Check if it's secp256r1 or Ed25519 */
             if (pPublicKeyTemplate[i].ulValueLen == sizeof(OID_SECP256R1) &&
                 memcmp(pPublicKeyTemplate[i].pValue, OID_SECP256R1, sizeof(OID_SECP256R1)) == 0) {
                 curve = TR01_CURVE_P256;
                 LT_PKCS11_LOG("  Curve: P-256 (secp256r1)");
+
             } else if (pPublicKeyTemplate[i].ulValueLen == sizeof(OID_ED25519) &&
                        memcmp(pPublicKeyTemplate[i].pValue, OID_ED25519, sizeof(OID_ED25519)) == 0) {
                 curve = TR01_CURVE_ED25519;
                 LT_PKCS11_LOG("  Curve: Ed25519");
+
             } else {
                 LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
             }
-        } else if (pPublicKeyTemplate[i].type == CKA_LABEL && pPublicKeyTemplate[i].pValue) {
-            /* Parse LABEL as slot number */
+
+        } else if (pPublicKeyTemplate[i].type == CKA_ID && pPublicKeyTemplate[i].pValue) {
+            /* Parse ID as slot number */
             if (pPublicKeyTemplate[i].ulValueLen > 0) {
-                char temp[16] = {0};
-                CK_ULONG copy_len = (pPublicKeyTemplate[i].ulValueLen < 15) ? pPublicKeyTemplate[i].ulValueLen : 15;
-                memcpy(temp, pPublicKeyTemplate[i].pValue, copy_len);
-                slot_id = (CK_ULONG)atoi(temp);
+                slot_id = *((uint8_t*)pPublicKeyTemplate[i].pValue);
                 LT_PKCS11_LOG("  Slot from public template: %lu", slot_id);
             }
         }
     }
 
-    /* Also check private key template for LABEL */
+    /* Also check private key template for ID */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
         for (CK_ULONG i = 0; i < ulPrivateKeyAttributeCount; i++) {
-            if (pPrivateKeyTemplate[i].type == CKA_LABEL && pPrivateKeyTemplate[i].pValue) {
+            if (pPrivateKeyTemplate[i].type == CKA_ID && pPrivateKeyTemplate[i].pValue) {
                 if (pPrivateKeyTemplate[i].ulValueLen > 0) {
-                    char temp[16] = {0};
-                    CK_ULONG copy_len = (pPrivateKeyTemplate[i].ulValueLen < 15) ? pPrivateKeyTemplate[i].ulValueLen : 15;
-                    memcpy(temp, pPrivateKeyTemplate[i].pValue, copy_len);
-                    slot_id = (CK_ULONG)atoi(temp);
+                    slot_id = *((uint8_t*)pPublicKeyTemplate[i].pValue);
                     LT_PKCS11_LOG("  Slot from private template: %lu", slot_id);
                 }
             }

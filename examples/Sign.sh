@@ -32,7 +32,7 @@ fi
 SLOT_HEX=$(printf '%02x' "$SLOT")
 
 echo "Signing with slot $SLOT (id=0x$SLOT_HEX), mech=$MECH"
-pkcs11-tool --module "$MODULE" --sign --mechanism "$MECH" \
+pkcs11-tool --module "$MODULE" --sign --pin 1234 --mechanism "$MECH" \
     --id "$SLOT_HEX" --input-file "$IN" --output-file "$OUT"
 
 echo "Signature (first 2 lines):"
