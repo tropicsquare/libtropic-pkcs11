@@ -638,7 +638,6 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
     CK_RV rv = CKR_OK;
 
-    /* Handle R-MEM Data Objects */
     if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
 
         uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
@@ -657,18 +656,12 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
         }
 
-        /* Generate label for this slot (just the slot number) */
-        char label[32];
-        snprintf(label, sizeof(label), "%u", slot);
-        CK_ULONG label_len = strlen(label);
-
-        const char *application = "TropicSquare";
-        CK_ULONG app_len = strlen(application);
-
         /* Fill in requested attributes for CKO_DATA */
         for (CK_ULONG i = 0; i < ulCount; i++) {
             switch (pTemplate[i].type) {
-            case CKA_CLASS: {
+
+            case CKA_CLASS:
+            {
                 CK_OBJECT_CLASS obj_class = CKO_DATA;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
@@ -681,7 +674,14 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
+
             case CKA_LABEL:
+            {
+                /* Generate label for this slot */
+                char label[4]; // Max 512 slots
+                snprintf(label, sizeof(label), "%u", slot);
+                CK_ULONG label_len = strlen(label);
+
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = label_len;
                 } else if (pTemplate[i].ulValueLen >= label_len) {
@@ -692,7 +692,13 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                     rv = CKR_BUFFER_TOO_SMALL;
                 }
                 break;
+            }
+
             case CKA_APPLICATION:
+            {
+                const char *application = "TropicSquare";
+                CK_ULONG app_len = strlen(application);
+
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = app_len;
                 } else if (pTemplate[i].ulValueLen >= app_len) {
@@ -703,6 +709,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                     rv = CKR_BUFFER_TOO_SMALL;
                 }
                 break;
+            }
+
             case CKA_VALUE:
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = data_size;
@@ -729,15 +737,16 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
+
             default:
                 pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 rv = CKR_ATTRIBUTE_TYPE_INVALID;
                 break;
             }
         }
-    }
-    /* Handle ECC Keys (Private and Public) */
-    else if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) || PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
+    } else if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) ||
+               PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
+
         uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
         lt_ecc_curve_type_t curve;
         lt_ecc_key_origin_t origin;
@@ -754,7 +763,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         }
 
         CK_BBOOL is_private = (handle_type == PKCS11_HANDLE_TYPE_ECC_PRIVKEY);
-        uint16_t pubkey_len = (curve == TR01_CURVE_P256) ? TR01_CURVE_P256_PUBKEY_LEN : TR01_CURVE_ED25519_PUBKEY_LEN;
+        uint16_t pubkey_len = (curve == TR01_CURVE_P256) ? TR01_CURVE_P256_PUBKEY_LEN :
+                                                           TR01_CURVE_ED25519_PUBKEY_LEN;
 
         /* Generate label for this key */
         /* Label is just the slot number (consistent with --label usage) */
