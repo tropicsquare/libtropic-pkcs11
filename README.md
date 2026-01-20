@@ -1,19 +1,21 @@
 # libtropic-pkcs11
 
-A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This library provides a standard cryptographic token interface (Cryptoki) to access TROPIC01's security features.
+A PKCS#11 module for the **TROPIC01** secure element by Tropic Square.
+This library provides a standard cryptographic token interface (Cryptoki)
+to access TROPIC01's features.
 
 ## Features
 
-- **Hardware Random Number Generation** - Generate cryptographically secure random numbers using TROPIC01's true hardware RNG
+- **Hardware Random Number Generation** - Generate cryptographically secure random numbers using TROPIC01's TRNG
 - **Secure User Data Storage** - Store up to 512 slots of user data (up to 444 bytes each) in TROPIC01's secure R-MEM
-- **ECC Key Generation** - Generate P-256 (secp256r1) and Ed25519 key pairs stored securely in TROPIC01
+- **ECC Key Generation** - Generate P-256 (secp256r1) and Ed25519 key pairs securely in TROPIC01
 - **Digital Signatures** - Sign data using ECDSA (P-256) or EdDSA (Ed25519) - private keys never leave the chip
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Application Layer                           │
+│                       Application Layer                         │
 │              (pkcs11-tool, OpenSSL, Firefox, etc.)              │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -26,12 +28,12 @@ A PKCS#11 module for the **TROPIC01** secure element by Tropic Square. This libr
                               ▼ libtropic API
 ┌─────────────────────────────────────────────────────────────────┐
 │                        libtropic                                │
-│          (TROPIC01 Communication Library)                       │
+│                (TROPIC01 Communication Library)                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼ USB Serial (/dev/ttyACM0)
 ┌─────────────────────────────────────────────────────────────────┐
-│                    TROPIC01 Secure Element                      │
+│                 TROPIC01 Secure Element                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,16 +81,14 @@ pkcs11-tool --module ./libtropic_pkcs11.so --show-info
 
 ## Quick Start Examples
 
-Example scripts are provided in the `examples/` directory. Each script demonstrates one atomic operation.
+Example scripts are provided in the `examples/` directory or
+bellow as commands in command line.
 
 ### Generate Random Numbers
 
 Generate cryptographically secure random bytes from TROPIC01's hardware RNG:
 
 ```bash
-# Using the example script
-./examples/GenerateRandom.sh
-
 # Or directly with pkcs11-tool
 pkcs11-tool --module ./build/libtropic_pkcs11.so --generate-random 32 \
     --output-file /tmp/random.bin && xxd /tmp/random.bin
@@ -99,13 +99,13 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so --generate-random 32 \
 Write, read, and erase user data in TROPIC01's secure R-Memory storage (512 slots, 0-511):
 
 ```bash
-# Store data to R-Memory slot 60:
+# Store data from "data.bin" to R-Memory slot 60:
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
-    --write-object /tmp/data.bin --type data --label "60"
+    --write-object data.bin --type data --label "60"
 
-# Read data back from R-Memory slot 60:
+# Read data back from R-Memory slot 60 and write them to "read.bin":
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
-    --read-object --type data --label "60" -o /tmp/read.bin && xxd /tmp/read.bin
+    --read-object --type data --label "60" -o read.bin
 
 # Erase data in R-Memory slot 60:
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
@@ -114,7 +114,7 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so \
 
 ### Generate ECC Key Pair
 
-Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC key slots (0-31):
+Generate a P-256 or Ed25519 key pair in one of TROPIC01's 32 ECC key slots:
 
 ```bash
 # Generate P-256 key in ECC Key slot 24 (slot index must be converted to hexadecimal)
@@ -132,21 +132,13 @@ Sign data using a private key stored in TROPIC01 (private key never leaves the c
 
 ```bash
 # Create test data (32 bytes for ECDSA hash input)
-echo "0123456789ABCDEF0123456789ABCDEF" > /tmp/hash.bin
+echo "0123456789ABCDEF0123456789ABCDEF" > hash.bin
 
-# Sign with P-256 key in slot 24
-SLOT=24 MECH=ECDSA ./examples/Sign.sh
-
-# Sign with Ed25519 key in slot 5
-SLOT=5 MECH=EDDSA ./examples/Sign.sh
-```
-
-**Note:** For signing, use the slot number in hex format with `--id`:
-```bash
-# Slot 24 = 0x18 in hex
+# Sign content of "hash.bin" with ECDSA with Key in Slot 24 (18 hexadecimally)
+# and write the signature to "sig.bin"
 pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --sign --mechanism ECDSA --id "18" \
-    --input-file /tmp/hash.bin --output-file /tmp/sig.bin
+    --input-file hash.bin --output-file sig.bin
 ```
 
 ### Erase ECC Key
@@ -157,52 +149,47 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type privkey --id "18"
 ```
 
-### Run All Tests
-
-```bash
-./examples/TestAll.sh
-```
 
 ## Slot Specification
 
 All operations require explicit slot specification via `--label`:
 
-| Object Type | Slot Range | Attribute | Example |
-|-------------|------------|-----------|---------|
-| User Data (R-MEM) | 0-511 | `--label "60"` | `--type data --label "60"` |
-| ECC Keys | 0-31 | `--label "24"` | `--keypairgen --label "24"` |
-| Signing* | 0-31 | `--id "18"` | `--sign --id "18"` (slot 24 = 0x18) |
+| Object Type       | Slot Range | Attribute      | Example                             |
+|-------------------|------------|----------------|-------------------------------------|
+| User Data (R-MEM) | 0-511      | `--label "60"` | `--type data --label "60"`          |
+| ECC Keys          | 0-31       | `--label "24"` | `--keypairgen --label "24"`         |
+| Signing*          | 0-31       | `--id "18"`    | `--sign --id "18"` (slot 24 = 0x18) |
 
 *Note: Due to a pkcs11-tool limitation, signing requires `--id` with the slot number in hex.
 
 ## Implemented PKCS#11 Functions
 
-| Function | Status | Description |
-|----------|--------|-------------|
-| `C_Initialize` | ✅ | Initialize library, connect to TROPIC01 |
-| `C_Finalize` | ✅ | Clean up, disconnect from TROPIC01 |
-| `C_GetInfo` | ✅ | Get library information |
-| `C_GetFunctionList` | ✅ | Get function pointer table |
-| `C_GetSlotList` | ✅ | List available slots |
-| `C_GetSlotInfo` | ✅ | Get slot information |
-| `C_GetTokenInfo` | ✅ | Get token info (chip ID, FW version) |
-| `C_GetMechanismList` | ✅ | List supported mechanisms |
-| `C_GetMechanismInfo` | ✅ | Get mechanism details |
-| `C_OpenSession` | ✅ | Open a session |
-| `C_CloseSession` | ✅ | Close a session |
-| `C_Login` | ✅ | No-op (auth via pairing keys) |
-| `C_Logout` | ✅ | No-op |
-| `C_CreateObject` | ✅ | Write data to R-MEM slot |
-| `C_DestroyObject` | ✅ | Erase R-MEM slot or ECC key |
-| `C_GetAttributeValue` | ✅ | Read data/key attributes |
-| `C_FindObjectsInit` | ✅ | Start object search |
-| `C_FindObjects` | ✅ | Find objects (R-MEM/keys) |
-| `C_FindObjectsFinal` | ✅ | End object search |
-| `C_GenerateKeyPair` | ✅ | Generate P-256 or Ed25519 key pair |
-| `C_SignInit` | ✅ | Initialize ECDSA/EdDSA signing |
-| `C_Sign` | ✅ | Sign data (on TROPIC01) |
-| `C_GenerateRandom` | ✅ | Generate random bytes (HWRNG) |
-| `C_SeedRandom` | ✅ | Returns "not supported" (HWRNG) |
+| Function                | Status | Description                                |
+|-------------------------|--------|--------------------------------------------|
+| `C_Initialize`          |  ✅    | Initialize library, connect to TROPIC01    |
+| `C_Finalize`            |  ✅    | Clean up, disconnect from TROPIC01         |
+| `C_GetInfo`             |  ✅    | Get library information                    |
+| `C_GetFunctionList`     |  ✅    | Get function pointer table                 |
+| `C_GetSlotList`         |  ✅    | List available slots                       |
+| `C_GetSlotInfo`         |  ✅    | Get slot information                       |
+| `C_GetTokenInfo`        |  ✅    | Get token info (chip ID, FW version)       |
+| `C_GetMechanismList`    |  ✅    | List supported mechanisms                  |
+| `C_GetMechanismInfo`    |  ✅    | Get mechanism details                      |
+| `C_OpenSession`         |  ✅    | Open a session                             |
+| `C_CloseSession`        |  ✅    | Close a session                            |
+| `C_Login`               |  ✅    | No-op (auth via pairing keys)              |
+| `C_Logout`              |  ✅    | No-op                                      |
+| `C_CreateObject`        |  ✅    | Write data to R-MEM slot                   |
+| `C_DestroyObject`       |  ✅    | Erase R-MEM slot or ECC key                |
+| `C_GetAttributeValue`   |  ✅    | Read data/key attributes                   |
+| `C_FindObjectsInit`     |  ✅    | Start object search                        |
+| `C_FindObjects`         |  ✅    | Find objects (R-MEM/keys)                  |
+| `C_FindObjectsFinal`    |  ✅    | End object search                          |
+| `C_GenerateKeyPair`     |  ✅    | Generate P-256 or Ed25519 key pair         |
+| `C_SignInit`            |  ✅    | Initialize ECDSA/EdDSA signing             |
+| `C_Sign`                |  ✅    | Sign data (on TROPIC01)                    |
+| `C_GenerateRandom`      |  ✅    | Generate random bytes (HWRNG)              |
+| `C_SeedRandom`          |  ✅    | Returns "not supported" (HWRNG)            |
 
 ## Configuration
 
@@ -221,7 +208,9 @@ ls -la /dev/ttyACM*
 
 ### Pairing Keys
 
-The module uses pairing keys stored in `libtropic/keys/keys.c`. The default keys (sh0) work with standard Tropic Square development chips. For custom-provisioned chips, update these keys.
+The module uses Pairing keys stored in `libtropic/keys/keys.c`.
+The default Sh0 keys work with standard Tropic Square development chips.
+For custom-provisioned chips, update these keys.
 
 ## Troubleshooting
 
@@ -246,12 +235,11 @@ If you get permission errors accessing `/dev/ttyACM0`:
 
 ## Security Notice
 
-⚠️ **Warning**: The default pairing keys in this repository are for **development and testing only**. They are publicly known and should NOT be used in production. For production deployments:
-
-1. Provision your TROPIC01 chips with unique keys
-2. Update `libtropic/keys/keys.c` with your private keys
-3. Never commit private keys to version control
+⚠️ **Warning**: The default pairing keys in this repository are for **development and testing only**.
+They are publicly known and should NOT be used in production. For production use reffer to
+`libtropic` documentation on how to write your own Pairing Keys.
 
 ## License
 
-See the [LICENSE.md](./LICENSE.md) file in the root of this repository or consult license information at [Tropic Square website](https://tropicsquare.com).
+See the [LICENSE.md](./LICENSE.md) file in the root of this repository or consult license information
+at [Tropic Square website](https://tropicsquare.com).
