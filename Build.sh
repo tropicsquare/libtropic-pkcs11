@@ -2,8 +2,6 @@
 # Build the PKCS#11 module from source
 # Usage: ./Build.sh
 #
-# Creates a clean build in the 'build' directory with logging enabled.
-#
 # Build steps:
 #   1. Remove existing build directory for clean build
 #   2. Run cmake with USB device path and logging enabled
@@ -12,11 +10,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-
+ROOT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 cd "$ROOT_DIR"
+
 rm -rf build
 mkdir build
+
 cd build
-cmake -DTS_USB_DEV="/dev/ttyACM0" -DLT_PKCS11_LOG_EN=ON ..
-make
+cmake -DTS_USB_DEV="/dev/ttyACM0" ..
+make -j`nproc`
