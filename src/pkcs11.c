@@ -714,23 +714,9 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                     rv = CKR_BUFFER_TOO_SMALL;
                 }
                 break;
-            case CKA_ID: {
-                /* R-MEM objects use ID format: 2 bytes big-endian with high byte = 0x80
-                    * This distinguishes R-MEM IDs from ECC IDs (which are 0x00-0x1F)
-                    * Example: R-MEM slot 5 → ID = 0x80 0x05 */
-                uint8_t id_bytes[2] = { 0x80, (uint8_t)slot };
-                if (pTemplate[i].pValue == NULL) {
-                    pTemplate[i].ulValueLen = 2;
-                } else if (pTemplate[i].ulValueLen >= 2) {
-                    memcpy(pTemplate[i].pValue, id_bytes, 2);
-                    pTemplate[i].ulValueLen = 2;
-                } else {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_BUFFER_TOO_SMALL;
-                }
-                break;
-            }
-            case CKA_TOKEN: {
+
+            case CKA_TOKEN:
+            {
                 CK_BBOOL on_token = CK_TRUE;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
