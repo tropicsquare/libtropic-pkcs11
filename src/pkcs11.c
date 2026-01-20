@@ -1064,44 +1064,52 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     }
 
     /* Parse template to find object class and label filter */
-    CK_OBJECT_CLASS find_class = 0;
-    CK_BBOOL find_slot_set = CK_FALSE;
-    CK_ULONG find_slot = 0;
-
-    for (CK_ULONG i = 0; i < ulCount; i++) {
-
-        if (pTemplate[i].type == CKA_CLASS && pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
-            find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
-            LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", find_class);
-
-        } else if (pTemplate[i].type == CKA_LABEL && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
-            /* Parse CKA_LABEL as slot number (decimal string) - preferred method */
-            char temp[16] = {0};
-            CK_ULONG copy_len = (pTemplate[i].ulValueLen < 15) ? pTemplate[i].ulValueLen : 15;
-            memcpy(temp, pTemplate[i].pValue, copy_len);
-            find_slot = (CK_ULONG)atoi(temp);
-            find_slot_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, find_slot);
-
-        } else if (pTemplate[i].type == CKA_ID && pTemplate[i].pValue && pTemplate[i].ulValueLen > 0 && !find_slot_set) {
-            /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
-            uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-            find_slot = (CK_ULONG)id_bytes[0];
-            find_slot_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], find_slot);
-        }
-    }
-
-    /* Initialize find state */
     pkcs11_ctx.find_active = CK_TRUE;
-    pkcs11_ctx.find_class = find_class;
+    pkcs11_ctx.find_class = 0;
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
-    pkcs11_ctx.find_id_set = find_slot_set;
-    pkcs11_ctx.find_id = find_slot;
+    pkcs11_ctx.find_id_set = 0;
+    pkcs11_ctx.find_id = 0;
 
-    LT_PKCS11_LOG("(class=0x%lx, slot_set=%d, slot=%lu)", find_class, find_slot_set, find_slot);
+    for (CK_ULONG i = 0; i < ulCount; i++) {
+
+        if (pTemplate[i].type == CKA_CLASS &&
+            pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
+
+            pkcs11_ctx.find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+            LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", pkcs11_ctx.find_class);
+
+        } else if (pTemplate[i].type == CKA_LABEL &&
+                   pTemplate[i].pValue &&
+                   pTemplate[i].ulValueLen > 0) {
+
+            /* Parse CKA_LABEL as slot number (decimal string) - preferred method */
+            char temp[16] = {0};
+            CK_ULONG copy_len = TRIM_LENGTH(pTemplate[i].ulValueLen, 15);
+            memcpy(temp, pTemplate[i].pValue, copy_len);
+            pkcs11_ctx.find_id = (CK_ULONG)atoi(temp);
+            pkcs11_ctx.find_id_set = CK_TRUE;
+
+            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, pkcs11_ctx.find_id);
+
+        } else if (pTemplate[i].type == CKA_ID &&
+                   pTemplate[i].pValue &&
+                   pTemplate[i].ulValueLen > 0 &&
+                   !pkcs11_ctx.find_id_set) {
+
+            /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
+            uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
+            pkcs11_ctx.find_id = (CK_ULONG)id_bytes[0];
+            pkcs11_ctx.find_id_set = CK_TRUE;
+            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], pkcs11_ctx.find_id);
+        }
+    }
+
+    LT_PKCS11_LOG("(class=0x%lx, slot_set=%d, slot=%lu)",
+                    pkcs11_ctx.find_class, pkcs11_ctx.find_id_set,
+                    pkcs11_ctx.find_id);
+
     LT_PKCS11_RETURN(CKR_OK);
 }
 
