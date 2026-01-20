@@ -1024,8 +1024,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
         LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
     }
 
-    // TODO: Refactor this
-    LT_PKCS11_LOG("C_GetAttributeValue returning 0x%lx", rv);
+    LT_PKCS11_LOG("0x%lx", rv);
     return rv;
 }
 
@@ -1718,7 +1717,6 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
     CK_ULONG slot_id = CK_UNAVAILABLE_INFORMATION;
 
     /* Check public key template for EC_PARAMS (curve) and LABEL (slot) */
-    printf("ulPublicKeyAttributeCount: %lu\n", ulPublicKeyAttributeCount);
     for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++) {
         if (pPublicKeyTemplate[i].type == CKA_EC_PARAMS && pPublicKeyTemplate[i].pValue) {
 
