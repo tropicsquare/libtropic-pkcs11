@@ -69,12 +69,13 @@ typedef struct {
 
     /* C_FindObjects state */
     CK_BBOOL                    find_active;
-    CK_OBJECT_CLASS             find_class;
     uint16_t                    find_rmem_index;
     uint8_t                     find_ecc_index;
     CK_BBOOL                    find_ecc_done;
-    CK_BBOOL                    find_id_set;    /* True if filtering by slot (via CKA_LABEL) */
-    CK_ULONG                    find_id;        /* The ID value to filter by (slot number) */
+    CK_OBJECT_CLASS             find_class;
+    CK_BBOOL                    find_class_set;
+    CK_BBOOL                    find_slot_set;
+    CK_ULONG                    find_slot;
 
     /* C_Sign state */
     CK_BBOOL                    sign_active;
@@ -1065,12 +1066,14 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
 
     /* Parse template to find object class and label filter */
     pkcs11_ctx.find_active = CK_TRUE;
-    pkcs11_ctx.find_class = 0;
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
-    pkcs11_ctx.find_id_set = 0;
-    pkcs11_ctx.find_id = 0;
+
+    pkcs11_ctx.find_slot = 0;
+    pkcs11_ctx.find_slot_set = CK_FALSE;
+    pkcs11_ctx.find_class = 0;
+    pkcs11_ctx.find_class_set = CK_FALSE;
 
     for (CK_ULONG i = 0; i < ulCount; i++) {
 
@@ -1078,6 +1081,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
             pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS)) {
 
             pkcs11_ctx.find_class = *(CK_OBJECT_CLASS*)pTemplate[i].pValue;
+            pkcs11_ctx.find_class_set = CK_TRUE;
             LT_PKCS11_LOG("  Filter CKA_CLASS = 0x%lx", pkcs11_ctx.find_class);
 
         } else if (pTemplate[i].type == CKA_LABEL &&
@@ -1088,27 +1092,27 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
             char temp[16] = {0};
             CK_ULONG copy_len = TRIM_LENGTH(pTemplate[i].ulValueLen, 15);
             memcpy(temp, pTemplate[i].pValue, copy_len);
-            pkcs11_ctx.find_id = (CK_ULONG)atoi(temp);
-            pkcs11_ctx.find_id_set = CK_TRUE;
+            pkcs11_ctx.find_slot = (CK_ULONG)atoi(temp);
+            pkcs11_ctx.find_slot_set = CK_TRUE;
 
-            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, pkcs11_ctx.find_id);
+            LT_PKCS11_LOG("  Filter CKA_LABEL = '%s' (slot %lu)", temp, pkcs11_ctx.find_slot);
 
         } else if (pTemplate[i].type == CKA_ID &&
                    pTemplate[i].pValue &&
                    pTemplate[i].ulValueLen > 0 &&
-                   !pkcs11_ctx.find_id_set) {
+                   !pkcs11_ctx.find_slot_set) {
 
             /* Fallback: parse CKA_ID as slot number (for pkcs11-tool --sign which doesn't pass CKA_LABEL) */
             uint8_t *id_bytes = (uint8_t*)pTemplate[i].pValue;
-            pkcs11_ctx.find_id = (CK_ULONG)id_bytes[0];
-            pkcs11_ctx.find_id_set = CK_TRUE;
-            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], pkcs11_ctx.find_id);
+            pkcs11_ctx.find_slot = (CK_ULONG)id_bytes[0];
+            pkcs11_ctx.find_slot_set = CK_TRUE;
+            LT_PKCS11_LOG("  Filter CKA_ID = 0x%02x (slot %lu)", id_bytes[0], pkcs11_ctx.find_slot);
         }
     }
 
-    LT_PKCS11_LOG("(class=0x%lx, slot_set=%d, slot=%lu)",
-                    pkcs11_ctx.find_class, pkcs11_ctx.find_id_set,
-                    pkcs11_ctx.find_id);
+    LT_PKCS11_LOG("(class=0x%lx, class_set=%d slot=%lu slot_set=%d)",
+                    pkcs11_ctx.find_class, pkcs11_ctx.find_class_set,
+                    pkcs11_ctx.find_slot, pkcs11_ctx.find_slot_set);
 
     LT_PKCS11_RETURN(CKR_OK);
 }
@@ -1140,73 +1144,101 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     }
 
     *pulObjectCount = 0;
-    CK_OBJECT_CLASS find_class = pkcs11_ctx.find_class;
 
-    /* Decide which backends to search based on class filter */
-    CK_BBOOL search_rmem = (find_class == 0 || find_class == CKO_DATA);
-    CK_BBOOL search_ecc = (find_class == 0 || find_class == CKO_PRIVATE_KEY || find_class == CKO_PUBLIC_KEY);
+    CK_BBOOL search_rmem = CK_FALSE;
+    CK_BBOOL search_ecc = CK_FALSE;
+
+    if (pkcs11_ctx.find_class_set == CK_TRUE) {
+        if (pkcs11_ctx.find_class == CKO_PRIVATE_KEY ||
+            pkcs11_ctx.find_class == CKO_PUBLIC_KEY) {
+            search_ecc = CK_TRUE;
+        } else if (pkcs11_ctx.find_class == CKO_DATA) {
+            search_rmem = CK_TRUE;
+        }
+    } else {
+        search_ecc = CK_TRUE;
+        search_rmem = CK_TRUE;
+    }
+
+    LT_PKCS11_LOG("search_ecc:  %d", search_ecc);
+    LT_PKCS11_LOG("search_rmem: %d", search_rmem);
 
     if (search_rmem) {
         uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
         uint16_t read_size;
 
-        while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX && *pulObjectCount < ulMaxObjectCount) {
+        while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX &&
+               *pulObjectCount < ulMaxObjectCount) {
+
             uint16_t slot = pkcs11_ctx.find_rmem_index++;
 
-            /* If filtering by ID, skip slots that don't match */
-            if (pkcs11_ctx.find_id_set && slot != (uint16_t)pkcs11_ctx.find_id) {
+            /* If filtering by slot, skip slots that don't match */
+            if (pkcs11_ctx.find_slot_set && slot != (uint16_t)pkcs11_ctx.find_slot) {
                 continue;
             }
 
-            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf, sizeof(temp_buf), &read_size);
-            if (ret == LT_OK) {
-                phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
-                (*pulObjectCount)++;
-                LT_PKCS11_LOG("lt_r_mem_data_read found data in slot: %u", slot);
-            }
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf,
+                                              sizeof(temp_buf), &read_size);
+
             /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
+            if (ret != LT_OK) {
+                continue;
+            }
+
+            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
+            (*pulObjectCount)++;
+
+            LT_PKCS11_LOG("Found USER-DATA in R-Memory slot: %u", slot);
         }
     }
 
     if (search_ecc && !pkcs11_ctx.find_ecc_done) {
 
-        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];  /* P256 is larger */
+        uint8_t pubkey_buf[TR01_CURVE_P256_PUBKEY_LEN];
+
         lt_ecc_curve_type_t curve;
         lt_ecc_key_origin_t origin;
 
-        while (pkcs11_ctx.find_ecc_index <= TR01_ECC_SLOT_31 && *pulObjectCount < ulMaxObjectCount) {
+        while (pkcs11_ctx.find_ecc_index <= TR01_ECC_SLOT_31 &&
+               *pulObjectCount < ulMaxObjectCount) {
             uint8_t slot = pkcs11_ctx.find_ecc_index++;
 
             /* If filtering by ID, skip slots that don't match */
-            if (pkcs11_ctx.find_id_set && slot != (uint8_t)pkcs11_ctx.find_id) {
+            if (pkcs11_ctx.find_slot_set && slot != (uint8_t)pkcs11_ctx.find_slot) {
                 continue;
             }
 
             lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                            pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
-            if (ret == LT_OK) {
 
-                /* Found a valid key - add private key handle (if searching for privkey or all) */
-                if (find_class == 0 || find_class == CKO_PRIVATE_KEY) {
-                    if (*pulObjectCount < ulMaxObjectCount) {
-                        phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot);
-                        (*pulObjectCount)++;
-                        LT_PKCS11_LOG("Found PRIVATE_KEY at ECC slot %u (handle=0x%lx, curve=%d)",
-                                      slot, phObject[*pulObjectCount - 1], curve);
-                    }
-                }
-
-                /* Add public key handle (if searching for pubkey or all) */
-                if (find_class == 0 || find_class == CKO_PUBLIC_KEY) {
-                    if (*pulObjectCount < ulMaxObjectCount) {
-                        phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot);
-                        (*pulObjectCount)++;
-                        LT_PKCS11_LOG("Found PUBLIC_KEY at ECC slot %u (handle=0x%lx, curve=%d)",
-                            slot, phObject[*pulObjectCount - 1], curve);
-                    }
-                }
+            /* Skip empty slots */
+            if (ret != LT_OK) {
+                continue;
             }
-            /* Skip empty/invalid slots (LT_L3_ECC_INVALID_KEY) */
+
+            if (*pulObjectCount >= ulMaxObjectCount) {
+                break;
+            }
+
+            /* Found a valid key - add private key handle (if searching for privkey or all) */
+            if (!pkcs11_ctx.find_class_set || pkcs11_ctx.find_class == CKO_PRIVATE_KEY) {
+                phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PRIVKEY, slot);
+                (*pulObjectCount)++;
+                LT_PKCS11_LOG("Found PRIVATE KEY in ECC slot %u (handle=0x%lx, curve=%d)",
+                                slot, phObject[*pulObjectCount - 1], curve);
+            }
+
+            if (*pulObjectCount >= ulMaxObjectCount) {
+                break;
+            }
+
+            /* Add public key handle (if searching for pubkey or all) */
+            if (!pkcs11_ctx.find_class_set || pkcs11_ctx.find_class == CKO_PUBLIC_KEY) {
+                phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_ECC_PUBKEY, slot);
+                (*pulObjectCount)++;
+                LT_PKCS11_LOG("Found PUBLIC KEY in ECC slot %u (handle=0x%lx, curve=%d)",
+                    slot, phObject[*pulObjectCount - 1], curve);
+            }
         }
 
         if (pkcs11_ctx.find_ecc_index > TR01_ECC_SLOT_31) {
@@ -1239,12 +1271,14 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
 
     /* Clear find state */
     pkcs11_ctx.find_active = CK_FALSE;
-    pkcs11_ctx.find_class = 0;
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
-    pkcs11_ctx.find_id_set = CK_FALSE;
-    pkcs11_ctx.find_id = 0;
+
+    pkcs11_ctx.find_class = 0;
+    pkcs11_ctx.find_class_set = CK_FALSE;
+    pkcs11_ctx.find_slot = 0;
+    pkcs11_ctx.find_slot_set = CK_FALSE;
 
     LT_PKCS11_RETURN(CKR_OK);
 }
