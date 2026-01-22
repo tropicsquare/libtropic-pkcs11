@@ -773,6 +773,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 
             case CKA_CLASS:
             {
+                LT_PKCS11_LOG("CKA_CLASS");
+
                 CK_OBJECT_CLASS obj_class = is_private ? CKO_PRIVATE_KEY : CKO_PUBLIC_KEY;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
@@ -787,7 +789,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             }
 
             case CKA_ID:
-                /* Generate id for this key */
+                LT_PKCS11_LOG("CKA_ID");
+
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = 1;
                 } else if (pTemplate[i].ulValueLen >= 1) {
@@ -801,6 +804,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 
             case CKA_KEY_TYPE:
             {
+                LT_PKCS11_LOG("CKA_KEY_TYPE");
+
                 CK_KEY_TYPE key_type = (curve == TR01_CURVE_P256) ? CKK_EC : CKK_EC_EDWARDS;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_KEY_TYPE);
@@ -815,6 +820,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             }
 
             case CKA_VALUE:
+                LT_PKCS11_LOG("CKA_VALUE");
+
                 /* For public keys, return the public key value */
                 /* For private keys, this is sensitive - return CKR_ATTRIBUTE_SENSITIVE per PKCS#11 spec */
                 if (is_private) {
@@ -832,7 +839,10 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                     }
                 }
                 break;
+
             case CKA_EC_POINT: {
+                LT_PKCS11_LOG("CKA_EC_POINT");
+
                 /* Return DER-encoded OCTET STRING containing uncompressed EC point */
                 /* Format: 04 <len> 04 <X> <Y> */
                 /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
@@ -874,7 +884,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_SIGN: {
+
+            case CKA_SIGN:
+            {
+                LT_PKCS11_LOG("CKA_SIGN");
+
                 /* Private keys can sign */
                 CK_BBOOL can_sign = is_private ? CK_TRUE : CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
@@ -888,7 +902,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_VERIFY: {
+
+            case CKA_VERIFY:
+            {
+                LT_PKCS11_LOG("CKA_VERIFY");
+
                 /* Public keys can verify */
                 CK_BBOOL can_verify = is_private ? CK_FALSE : CK_TRUE;
                 if (pTemplate[i].pValue == NULL) {
@@ -902,6 +920,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
+
             /* Attributes that are always FALSE for our keys */
             case CKA_DECRYPT:
             case CKA_ENCRYPT:
@@ -909,7 +928,8 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             case CKA_UNWRAP:
             case CKA_DERIVE:
             case CKA_SIGN_RECOVER:
-            case CKA_VERIFY_RECOVER: {
+            case CKA_VERIFY_RECOVER:
+            {
                 CK_BBOOL attr_false = CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
                     pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
@@ -922,10 +942,12 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
+
             /* Private key specific attributes */
             case CKA_SENSITIVE:
             case CKA_ALWAYS_SENSITIVE:
-            case CKA_NEVER_EXTRACTABLE: {
+            case CKA_NEVER_EXTRACTABLE:
+            {
                 /* Private keys are always sensitive and never extractable */
                 CK_BBOOL attr_val = is_private ? CK_TRUE : CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
@@ -939,7 +961,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_EXTRACTABLE: {
+
+            case CKA_EXTRACTABLE:
+            {
+                LT_PKCS11_LOG("CKA_EXTRACTABLE");
+
                 /* Private keys are NEVER extractable from TROPIC01 */
                 CK_BBOOL extractable = CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
@@ -953,7 +979,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_LOCAL: {
+
+            case CKA_LOCAL:
+            {
+                LT_PKCS11_LOG("CKA_LOCAL");
+
                 /* Keys generated on chip are local */
                 CK_BBOOL is_local = (origin == TR01_CURVE_GENERATED) ? CK_TRUE : CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
@@ -967,7 +997,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_ALWAYS_AUTHENTICATE: {
+
+            case CKA_ALWAYS_AUTHENTICATE:
+            {
+                LT_PKCS11_LOG("CKA_ALWAYS_AUTHENTICATE");
+
                 /* We don't require per-operation authentication */
                 CK_BBOOL always_auth = CK_FALSE;
                 if (pTemplate[i].pValue == NULL) {
@@ -981,7 +1015,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
-            case CKA_EC_PARAMS: {
+
+            case CKA_EC_PARAMS:
+            {
+                LT_PKCS11_LOG("CKA_EC_PARAMS");
+
                 /* Return DER-encoded curve OID */
                 const CK_BYTE *ec_params;
                 CK_ULONG ec_params_len;
@@ -1013,6 +1051,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 }
                 break;
             }
+
             default:
                 pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 rv = CKR_ATTRIBUTE_TYPE_INVALID;
