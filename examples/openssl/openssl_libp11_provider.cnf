@@ -1,0 +1,34 @@
+#
+# OpenSSL configuration file with PKCS#11 RNG Source configured.
+#
+
+HOME			= .
+
+openssl_conf = openssl_init
+
+config_diagnostics = 1
+
+#oid_section = new_oids
+
+[openssl_init]
+providers = provider_sect
+
+# List of providers to load
+[provider_sect]
+default = default_sect
+pkcs11 = pkcs11_sect
+
+[default_sect]
+activate = 1
+
+[pkcs11_sect]
+identity = pkcs11prov
+module = /usr/lib/x86_64-linux-gnu/engines-3/pkcs11prov.so
+pkcs11_module = ../../build/libtropic_pkcs11.so
+
+# Currently libtropic_pkcs11 implements dummy C_Login, so we don't enforce login!
+# If force_login is uncommented, OpenSSL calls into C_Login.
+#force_login = 1
+#pin = XXXXX
+
+activate = 1
