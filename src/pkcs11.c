@@ -13,20 +13,23 @@
 
 #include "libtropic.h"
 #include "libtropic_common.h"
-#include "libtropic_examples.h"
-#include "libtropic_logging.h"
-#include "libtropic_port.h"
-#include "libtropic_port_unix_usb_dongle.h"
+#include "libtropic_openssl.h"
+#include "libtropic_port_posix_usb_dongle.h"
 
 
 /**************************************************************************************************
  * TROPIC01 specifics
  *************************************************************************************************/
 
-/* Pairing keys for secure session (defined in libtropic/keys/keys.c) */
-extern uint8_t sh0priv[];
-extern uint8_t sh0pub[];
+/* Pairing keys for secure session (defined in libtropic/libtropic_default_sh0_keys.c) */
+#define LT_PKCS11_SH0_PRIV sh0priv_prod0
+#define LT_PKCS11_SH0_PUB sh0pub_prod0
 
+/*
+ * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.
+ * For new firmware versions, a few bytes will be unused, this is intentional.
+ */
+#define LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX 444
 
 /**************************************************************************************************
  * PKCS11 context and helpers
@@ -64,7 +67,8 @@ typedef struct {
     CK_BBOOL                    initialized;
     CK_BBOOL                    session_open;
     lt_handle_t                 lt_handle;
-    lt_dev_unix_usb_dongle_t    lt_device;
+    lt_dev_posix_usb_dongle_t   lt_device;
+    lt_ctx_openssl_t            lt_crypto_ctx;
     CK_SESSION_HANDLE           session_handle;
 
     /* C_FindObjects state */
@@ -140,6 +144,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     /* Initialize libtropic handle */
     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
     pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
+    pkcs11_ctx.lt_handle.l3.crypto_ctx = &pkcs11_ctx.lt_crypto_ctx;
 
     lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
     if (ret != LT_OK) {
@@ -404,8 +409,8 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     }
 
     /* Establish authenticated encrypted session with TROPIC01 */
-    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv,
-                    sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, LT_PKCS11_SH0_PRIV,
+                    LT_PKCS11_SH0_PUB, TR01_PAIRING_KEY_SLOT_INDEX_0);
 
     if (ret != LT_OK) {
         LT_PKCS11_LOG("lt_verify_chip_and_start_secure_session failed with: %s", lt_ret_verbose(ret));
@@ -536,7 +541,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     }
 
     /* Validate data size */
-    if (data_len < TR01_R_MEM_DATA_SIZE_MIN || data_len > TR01_R_MEM_DATA_SIZE_MAX) {
+    if (data_len < TR01_R_MEM_DATA_SIZE_MIN || data_len > LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX) {
         LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
     }
 
@@ -640,7 +645,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 
     if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
 
-        uint8_t data_buf[TR01_R_MEM_DATA_SIZE_MAX];
+        uint8_t data_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
         uint16_t data_size = 0;
 
         lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf,
@@ -753,7 +758,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 
         lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                        pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
-        if (ret == LT_L3_ECC_INVALID_KEY) {
+        if (ret == LT_L3_INVALID_KEY) {
             LT_PKCS11_LOG("lt_ecc_key_read failed with: Slot %u is empty", slot);
             LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
         }
@@ -1192,7 +1197,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     LT_PKCS11_LOG("search_rmem: %d", search_rmem);
 
     if (search_rmem) {
-        uint8_t temp_buf[TR01_R_MEM_DATA_SIZE_MAX];
+        uint8_t temp_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
         uint16_t read_size;
 
         while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX &&
@@ -1439,7 +1444,7 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
 
     lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                    pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
-    if (ret == LT_L3_ECC_INVALID_KEY) {
+    if (ret == LT_L3_INVALID_KEY) {
         LT_PKCS11_LOG("lt_ecc_key_read ECC slot %u is empty", slot);
         LT_PKCS11_RETURN(CKR_KEY_HANDLE_INVALID);
     }

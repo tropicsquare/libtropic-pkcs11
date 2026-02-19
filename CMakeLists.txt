@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.21.0)
+include (FetchContent)
 
 project(libtropic_pkcs11 VERSION 0.1)
 
@@ -15,9 +16,6 @@ set(TS_USB_DEV "/dev/ttyACM0" CACHE STRING "Device path for TROPIC01 USB dongle"
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
-set(LT_CRYPTO "trezor_crypto")  
-set(LT_BUILD_EXAMPLES ON CACHE BOOL "Build libtropic examples" FORCE)
-
 
 ###############################################################################
 # Print info
@@ -27,27 +25,49 @@ message("   Version:        ${CMAKE_PROJECT_VERSION}")
 message("   Logging:        ${LT_PKCS11_LOG_EN}")
 message("   USB device:     ${TS_USB_DEV}")
 message("   Libtropic:      ${PATH_LIBTROPIC}")
-message("   Libtropic CAL:  ${LT_CRYPTO}")
+message("   Libtropic CAL:  OpenSSL")
 message("")
+
+###############################################################################
+# Set up dependencies
+###############################################################################
+
+# ------------------------------------------------------------------------
+# Libtropic 
+# ------------------------------------------------------------------------
+# Add path to Libtropic source
+add_subdirectory(${PATH_LIBTROPIC} "libtropic")
+
+# Customize libtropic's compilation
+target_compile_options(tropic PRIVATE -ffunction-sections -fdata-sections)
+
+# ------------------------------------------------------------------------
+# External dependencies
+# ------------------------------------------------------------------------
+
+# OpenSSL
+find_package(OpenSSL REQUIRED)
+target_link_libraries(tropic PUBLIC OpenSSL::Crypto)
 
 ###############################################################################
 # Library definition
 ###############################################################################
 
+# Add OpenSSL CAL for Libtropic
+add_subdirectory("${PATH_LIBTROPIC}/cal/openssl" "openssl_cal")
+target_sources(tropic PRIVATE ${LT_CAL_SRCS})
+target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
+
+# Add USB DevKit POSIX HAL for Libtropic
+add_subdirectory("${PATH_LIBTROPIC}hal/posix/usb_dongle" "posix_usb_dongle")
+target_sources(tropic PRIVATE ${LT_HAL_SRCS})
+target_include_directories(tropic PUBLIC ${LT_HAL_INC_DIRS})
+
 add_library(tropic_pkcs11 SHARED
             src/pkcs11.h
             src/pkcs11.c
-            ${PATH_LIBTROPIC}/hal/port/unix/libtropic_port_unix_usb_dongle.c
     	    )
 
-# Add path to the libtropic's repository root folder.
-message("Libtropic initialization:")
-add_subdirectory(${PATH_LIBTROPIC} "libtropic")
-
-# Add include path for Unix HAL port headers
-target_include_directories(tropic_pkcs11 PRIVATE 
-    ${PATH_LIBTROPIC}/hal/port/unix
-)
 # TODO: Add -Wpedantic and clean-up
 target_compile_options(tropic_pkcs11 PUBLIC -Wall -Wextra)
 
