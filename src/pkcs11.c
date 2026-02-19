@@ -1053,7 +1053,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             }
 
             case CKA_LABEL:
-                // Pass dummy label with zero length.
+                /* Pass dummy label with zero length. */
                 pTemplate[i].ulValueLen = 0;
                 break;
 
