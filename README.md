@@ -208,9 +208,16 @@ ls -la /dev/ttyACM*
 
 ### Pairing Keys
 
-The module uses Pairing keys stored in `libtropic/keys/keys.c`.
-The default Sh0 keys work with standard Tropic Square development chips.
-For custom-provisioned chips, update these keys.
+The module uses Pairing keys stored in `libtropic/src/libtropic_default_sh0_keys.c`. By default,
+the module uses production keys.
+
+If you have an engineering sample TROPIC01, you need to redefine macros in `pkcs11.c`:
+- `LT_PKCS11_SH0_PRIV` to `sh0priv_eng_sample`
+- `LT_PKCS11_SH0_PUB` to `sh0pub_eng_sample`
+
+If you have custom-provisioned chips, pass arrays with your own keys.
+
+Read more about pairing keys in the [Libtropic documentation](https://tropicsquare.github.io/libtropic/latest/reference/default_pairing_keys/).
 
 ## Troubleshooting
 
@@ -218,8 +225,8 @@ For custom-provisioned chips, update these keys.
 
 The pairing keys don't match your chip. Check:
 1. Your chip batch/model
-2. The keys in `libtropic/keys/keys.c`
-3. Run `lt_ex_hello_world` from libtropic to verify correct keys
+2. The keys in `libtropic/src/libtropic_default_sh0_keys.c`
+3. Run ["Hello World" example](https://tropicsquare.github.io/libtropic/latest/tutorials/linux/usb_devkit/hello_world/) from Libtropic to verify correct keys
 
 ### Device Permission Denied
 
