@@ -13,10 +13,8 @@
 
 #include "libtropic.h"
 #include "libtropic_common.h"
-#include "libtropic_examples.h"
-#include "libtropic_logging.h"
-#include "libtropic_port.h"
-#include "libtropic_port_unix_usb_dongle.h"
+#include "libtropic_openssl.h"
+#include "libtropic_port_posix_usb_dongle.h"
 
 
 /**************************************************************************************************
@@ -69,7 +67,8 @@ typedef struct {
     CK_BBOOL                    initialized;
     CK_BBOOL                    session_open;
     lt_handle_t                 lt_handle;
-    lt_dev_unix_usb_dongle_t    lt_device;
+    lt_dev_posix_usb_dongle_t   lt_device;
+    lt_ctx_openssl_t            lt_crypto_ctx;
     CK_SESSION_HANDLE           session_handle;
 
     /* C_FindObjects state */
@@ -145,6 +144,7 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
     /* Initialize libtropic handle */
     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
     pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
+    pkcs11_ctx.lt_handle.l3.crypto_ctx = &pkcs11_ctx.lt_crypto_ctx;
 
     lt_ret_t ret = lt_init(&pkcs11_ctx.lt_handle);
     if (ret != LT_OK) {
