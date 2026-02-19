@@ -21,9 +21,9 @@
  * TROPIC01 specifics
  *************************************************************************************************/
 
-/* Pairing keys for secure session (defined in libtropic/keys/keys.c) */
-extern uint8_t sh0priv[];
-extern uint8_t sh0pub[];
+/* Pairing keys for secure session (defined in libtropic/libtropic_default_sh0_keys.c) */
+const uint8_t *sh0priv = sh0priv_prod0;
+const uint8_t *sh0pub = sh0pub_prod0;
 
 /*
  * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.
