@@ -1052,6 +1052,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 break;
             }
 
+            case CKA_LABEL:
+                // Pass dummy label with zero length.
+                pTemplate[i].ulValueLen = 0;
+                break;
+
             default:
                 pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 rv = CKR_ATTRIBUTE_TYPE_INVALID;
