@@ -25,7 +25,7 @@ message("   Version:        ${CMAKE_PROJECT_VERSION}")
 message("   Logging:        ${LT_PKCS11_LOG_EN}")
 message("   USB device:     ${TS_USB_DEV}")
 message("   Libtropic:      ${PATH_LIBTROPIC}")
-message("   Libtropic CAL:  ${LT_CRYPTO}")
+message("   Libtropic CAL:  OpenSSL")
 message("")
 
 ###############################################################################
