@@ -753,7 +753,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
 
         lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                        pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
-        if (ret == LT_L3_ECC_INVALID_KEY) {
+        if (ret == LT_L3_INVALID_KEY) {
             LT_PKCS11_LOG("lt_ecc_key_read failed with: Slot %u is empty", slot);
             LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
         }
@@ -1434,7 +1434,7 @@ CK_RV C_SignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJ
 
     lt_ret_t ret = lt_ecc_key_read(&pkcs11_ctx.lt_handle, (lt_ecc_slot_t)slot,
                                    pubkey_buf, sizeof(pubkey_buf), &curve, &origin);
-    if (ret == LT_L3_ECC_INVALID_KEY) {
+    if (ret == LT_L3_INVALID_KEY) {
         LT_PKCS11_LOG("lt_ecc_key_read ECC slot %u is empty", slot);
         LT_PKCS11_RETURN(CKR_KEY_HANDLE_INVALID);
     }
