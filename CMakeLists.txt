@@ -53,7 +53,7 @@ target_link_libraries(tropic PUBLIC OpenSSL::Crypto)
 # Library definition
 ###############################################################################
 
-# Add MbedTLS v4 CAL for Libtropic
+# Add OpenSSL CAL for Libtropic
 add_subdirectory("${PATH_LIBTROPIC}/cal/openssl" "openssl_cal")
 target_sources(tropic PRIVATE ${LT_CAL_SRCS})
 target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
