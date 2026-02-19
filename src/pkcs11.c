@@ -22,8 +22,8 @@
  *************************************************************************************************/
 
 /* Pairing keys for secure session (defined in libtropic/libtropic_default_sh0_keys.c) */
-const uint8_t *sh0priv = sh0priv_prod0;
-const uint8_t *sh0pub = sh0pub_prod0;
+#define LT_PKCS11_SH0_PRIV sh0priv_prod0
+#define LT_PKCS11_SH0_PUB sh0pub_prod0
 
 /*
  * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.
@@ -409,8 +409,8 @@ CK_RV C_OpenSession(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication,
     }
 
     /* Establish authenticated encrypted session with TROPIC01 */
-    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh0priv,
-                    sh0pub, TR01_PAIRING_KEY_SLOT_INDEX_0);
+    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, LT_PKCS11_SH0_PRIV,
+                    LT_PKCS11_SH0_PUB, TR01_PAIRING_KEY_SLOT_INDEX_0);
 
     if (ret != LT_OK) {
         LT_PKCS11_LOG("lt_verify_chip_and_start_secure_session failed with: %s", lt_ret_verbose(ret));
