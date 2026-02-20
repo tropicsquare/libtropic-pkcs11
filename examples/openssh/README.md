@@ -36,14 +36,14 @@ For other distributions, check your package manager or build from source.
 Follow these steps in order. Commands assume you run them from the directory containing the built
 `libtropic_pkcs11.so` provider; using the full path to the provider (recommended) avoids confusion.
 
-1. Generate the key pair on the TROPIC01 (P-256):
+**1. Generate the key pair on the TROPIC01 (P-256):**
 
 ```sh
 # Generate a P-256 key pair on the token (run from the build directory or use an absolute path)
 pkcs11-tool --module ./libtropic_pkcs11.so --keypairgen --key-type EC:secp256r1 --id "0"
 ```
 
-2. Extract the public key and convert it to an OpenSSH-compatible format:
+**2. Extract the public key and convert it to an OpenSSH-compatible format:**
 
 ```sh
 # Export public key (DER)
@@ -57,7 +57,7 @@ ssh-keygen -i -m PKCS8 -f my_p256_key.pem.pub > my_p256_key.pub
 rm my_p256_key.der.pub my_p256_key.pem.pub
 ```
 
-3. Copy the resulting `my_p256_key.pub` to the remote server's `~/.ssh/authorized_keys`.
+**3. Copy the resulting `my_p256_key.pub` to the remote server's `~/.ssh/authorized_keys`.**
 
 Options to upload the key:
 
@@ -71,7 +71,7 @@ ssh-copy-id -f -i ./my_p256_key.pub username@host
 Note: `ssh-copy-id` requires the public key be in OpenSSH text format — the `ssh-keygen -i ...`
 step above produces the correct format.
 
-4. Log in using OpenSSH with the PKCS#11 provider. When asked for PIN, do not enter anything and press Enter to continue (PIN is not used).
+**4. Log in using OpenSSH with the PKCS#11 provider. When asked for PIN, do not enter anything and press Enter to continue (PIN is not used).**
 
 ```sh
 ssh -I ./libtropic_pkcs11.so username@host
