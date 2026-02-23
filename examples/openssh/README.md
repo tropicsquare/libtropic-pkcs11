@@ -29,21 +29,26 @@ For other distributions, check your package manager or build from source.
 1. Build the provider and ensure `libtropic_pkcs11.so` is available in your current directory.
 2. Generate a key on the token with `pkcs11-tool`.
 3. Export the public key and convert it to OpenSSH format.
-4. Copy the public key to the server and connect with `ssh -I ./libtropic_pkcs11.so username@host`.
+4. Copy the public key to the server.
+5. Connect to the server.
 
 ## Step-by-step guide
 
 Follow these steps in order. Commands assume you run them from the directory containing the built
 `libtropic_pkcs11.so` provider; using the full path to the provider (recommended) avoids confusion.
+ 
+**1. Build the `libtropic_pkcs11.so` provider:**
 
-**1. Generate the key pair on the TROPIC01 (P-256):**
+Follow instructions in the [root README.md](../../README.md).
+
+**2. Generate the key pair on the TROPIC01 (P-256):**
 
 ```sh
 # Generate a P-256 key pair on the token (run from the build directory or use an absolute path)
 pkcs11-tool --module ./libtropic_pkcs11.so --keypairgen --key-type EC:secp256r1 --id "0"
 ```
 
-**2. Extract the public key and convert it to an OpenSSH-compatible format:**
+**3. Extract the public key and convert it to an OpenSSH-compatible format:**
 
 ```sh
 # Export public key (DER)
@@ -57,7 +62,7 @@ ssh-keygen -i -m PKCS8 -f my_p256_key.pem.pub > my_p256_key.pub
 rm my_p256_key.der.pub my_p256_key.pem.pub
 ```
 
-**3. Copy the resulting `my_p256_key.pub` to the remote server's `~/.ssh/authorized_keys`.**
+**4. Copy the resulting `my_p256_key.pub` to the remote server's `~/.ssh/authorized_keys`.**
 
 Options to upload the key:
 
@@ -71,7 +76,7 @@ ssh-copy-id -f -i ./my_p256_key.pub username@host
 Note: `ssh-copy-id` requires the public key be in OpenSSH text format — the `ssh-keygen -i ...`
 step above produces the correct format.
 
-**4. Log in using OpenSSH with the PKCS#11 provider. When asked for PIN, do not enter anything and press Enter to continue (PIN is not used).**
+**5. Log in using OpenSSH with the PKCS#11 provider. When asked for PIN, do not enter anything and press Enter to continue (PIN is not used).**
 
 ```sh
 ssh -I ./libtropic_pkcs11.so username@host
@@ -96,8 +101,6 @@ Quick checklist before troubleshooting:
 
 - Verify you use the correct, OpenSSH-formatted public key (`my_p256_key.pub`).
 - Use the correct path to the provider in `ssh -I ./libtropic_pkcs11.so ...`.
-- Run SSH with verbose logging: `ssh -vvv -I ./libtropic_pkcs11.so username@host` and
-  confirm the provider and key handles are listed.
 
 ### I cannot compile the module
 
@@ -113,9 +116,9 @@ username@host's password:
 
 This indicates the server did not accept the key. Common causes and checks:
 
-- Permissions: `authorized_keys` should be `600`, `.ssh` directory `700` on the server.
+- Permissions on the server: `authorized_keys` should be `600`, `.ssh` directory `700`.
 - Server config: ensure `PubkeyAuthentication yes` is set in `/etc/ssh/sshd_config` and the
-  server was reloaded.
+  SSH server daemon was reloaded.
 - Key format: confirm `my_p256_key.pub` contains the OpenSSH public-key text produced by
   `ssh-keygen -i -m PKCS8 ...`.
 - Device: if you have multiple TROPIC01 devices, use the same one the key was generated on.
@@ -134,7 +137,7 @@ You will see this error if both applies:
 - Password-based authentication is disabled on your server.
 - Key (signature done using the key) was not accepted.
 
-Causes are similar to the [issue with password](#i-still-get-asked-for-user-password-by-ssh).
+Causes are similar to the [issue with password](#ssh-still-prompts-for-password).
 
 ### Other errors
 Try these checks:
