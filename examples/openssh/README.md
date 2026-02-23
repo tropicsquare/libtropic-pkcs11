@@ -124,7 +124,7 @@ This indicates the server did not accept the key. Common causes and checks:
   `ssh-keygen -i -m PKCS8 ...`.
 - Device: if you have multiple TROPIC01 devices, use the same one the key was generated on.
 - Libtropic version:
-    - We provide compatible release/commit/branch of Libtropic in this repository. In previous versions there was a bug with ECDSA function which produced incorrect signatures. Please make sure to use the version supplied with this repository.
+    - Build `libtropic-pkcs11` against the Libtropic that is pinned in this repository. Older Libtropic versions contain an ECDSA bug that produces invalid signatures and causes SSH authentication to fail, so always use the pinned version from this repo.
 
 ### Permission denied (publickey)
 Symptom:
