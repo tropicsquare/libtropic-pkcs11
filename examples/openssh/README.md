@@ -134,7 +134,7 @@ $ ssh -I ./libtropic_pkcs11.so username@host
 Permission denied (publickey).
 ```
 
-You will see this error if both applies:
+You will see this error if both apply:
 - Password-based authentication is disabled on your server.
 - Key (signature done using the key) was not accepted.
 
