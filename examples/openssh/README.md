@@ -11,6 +11,7 @@ the TROPIC01 device, so the TROPIC01 USB DevKit acts as your hardware SSH key.
 You will need:
 - TROPIC01 USB DevKit
 - OpenSSH client
+- OpenSSL
 - `pkcs11-tool` (from OpenSC)
 - CMake, `make` and `gcc` to build `libtropic-pkcs11`
 
@@ -19,8 +20,8 @@ examples below assume the remote host is `username@host`.
 
 Install dependencies as needed:
 
-- Fedora: `sudo dnf install openssh opensc cmake make gcc`
-- Debian/Ubuntu: `sudo apt update && sudo apt install -y openssh-client opensc cmake make gcc`
+- Fedora: `sudo dnf install openssh openssl opensc cmake make gcc`
+- Debian/Ubuntu: `sudo apt update && sudo apt install -y openssh-client openssl opensc cmake make gcc`
 
 For other distributions, check your package manager or build from source.
 
