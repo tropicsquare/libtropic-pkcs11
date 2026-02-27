@@ -29,7 +29,26 @@
  * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.
  * For new firmware versions, a few bytes will be unused, this is intentional.
  */
-#define LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX 444
+#define LT_PKCS11_R_MEM_SLOT_SIZE 444u
+
+/**
+ * Define R-Memory partitioning.
+ * Slot 0-491: Arbitrary user data (CKO_DATA)
+ *      - Each PKCS#11 data slot = TROPIC01 R-Mem slot
+ * Slot 492-511: Certificate storage (CKO_CERTIFICATE)
+ *      - Each PKCS#11 cert slot = 10 TROPIC01 R-Mem slots
+ */
+#define PKCS11_CKO_DATA_SLOT_BEGIN 0
+#define PKCS11_CKO_DATA_SLOT_RMEM_SLOTS 1
+#define PKCS11_CKO_DATA_SLOT_SIZE_MIN 1
+#define PKCS11_CKO_DATA_SLOT_SIZE_MAX (PKCS11_CKO_DATA_SLOT_RMEM_SLOTS * LT_PKCS11_R_MEM_SLOT_SIZE)
+#define PKCS11_CKO_DATA_SLOT_COUNT 492
+
+#define PKCS11_CKO_CERT_SLOT_BEGIN 492
+#define PKCS11_CKO_CERT_SLOT_RMEM_SLOTS 10
+#define PKCS11_CKO_CERT_SLOT_SIZE_MIN 1
+#define PKCS11_CKO_CERT_SLOT_SIZE_MAX (PKCS11_CKO_CERT_SLOT_RMEM_SLOTS * LT_PKCS11_R_MEM_SLOT_SIZE)
+#define PKCS11_CKO_CERT_SLOT_COUNT 2
 
 /**************************************************************************************************
  * PKCS11 context and helpers
@@ -37,20 +56,26 @@
 
 /*
  * Object handle encoding:  (TYPE << 16) | SLOT_INDEX
- * R-MEM:                   512 slots (0-511), 1-444 bytes each
+ * CKO_DATA:                492 slots (0-491), 1-444 bytes each
+ * CKO_CERT                 2 "slots" mapped to 20 R-Mem slots (492-511)
  * ECC:                     32 slots (0-31), P256 or Ed25519
  */
-#define PKCS11_HANDLE_TYPE_RMEM_DATA    0x0001
+#define PKCS11_HANDLE_TYPE_CKO_DATA     0x0001
 #define PKCS11_HANDLE_TYPE_ECC_PRIVKEY  0x0002
 #define PKCS11_HANDLE_TYPE_ECC_PUBKEY   0x0003
+#define PKCS11_HANDLE_TYPE_CKO_CERT     0x0004
 
 #define PKCS11_MAKE_HANDLE(type, slot)     (((CK_OBJECT_HANDLE)(type) << 16) | (slot))
 #define PKCS11_HANDLE_GET_TYPE(h)          (((h) >> 16) & 0xFFFF)
 #define PKCS11_HANDLE_GET_SLOT(h)          ((h) & 0xFFFF)
 
-#define PKCS11_IS_VALID_RMEM_HANDLE(h) \
-    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_RMEM_DATA && \
-     PKCS11_HANDLE_GET_SLOT(h) <= TR01_R_MEM_DATA_SLOT_MAX)
+#define PKCS11_IS_VALID_RMEM_DATA_HANDLE(h) \
+    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_CKO_DATA && \
+     PKCS11_HANDLE_GET_SLOT(h) <  PKCS11_CKO_DATA_SLOT_COUNT)
+
+#define PKCS11_IS_VALID_RMEM_CERT_HANDLE(h) \
+    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_CKO_CERT && \
+     PKCS11_HANDLE_GET_SLOT(h) <  PKCS11_CKO_CERT_SLOT_COUNT)
 
 #define PKCS11_IS_VALID_ECC_PRIV_HANDLE(h) \
     (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_ECC_PRIVKEY && \
@@ -514,7 +539,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
             break;
 
         case CKA_LABEL:
-            /* Use CKA_LABEL as slot number for User Data (R-Mem)*/
+            /* Use CKA_LABEL as slot number for CKO_DATA or CKO_CERTIFICATE object */
             if (pTemplate[i].pValue && pTemplate[i].ulValueLen > 0) {
                 char temp[16] = {0};
                 memcpy(temp, pTemplate[i].pValue, TRIM_LENGTH(pTemplate[i].ulValueLen, 15));
@@ -530,44 +555,103 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
 
     LT_PKCS11_LOG("obj_class=0x%lx, data_len=%lu, slot_id=%lu", obj_class, data_len, slot_id);
 
-    /* We only support CKO_DATA objects */
-    if (obj_class != CKO_DATA) {
-        LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
-    }
-
+    /* Common parameter checks. */
     /* CKA_VALUE is required for data objects */
     if (!data_value || data_len == 0) {
+        LT_PKCS11_LOG("Data not passed (or zero length)!");
         LT_PKCS11_RETURN(CKR_TEMPLATE_INCOMPLETE);
-    }
-
-    /* Validate data size */
-    if (data_len < TR01_R_MEM_DATA_SIZE_MIN || data_len > LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX) {
-        LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
     }
 
     /* Slot must be specified */
     if (slot_id == CK_UNAVAILABLE_INFORMATION) {
+        LT_PKCS11_LOG("Slot not specified!");
         LT_PKCS11_RETURN(CKR_TEMPLATE_INCOMPLETE);
     }
 
-    /* Validate slot ID */
-    if (slot_id > TR01_R_MEM_DATA_SLOT_MAX) {
-        LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+    /* Object-specific parameter checks */
+    if (obj_class == CKO_DATA) {
+        /* Validate data size */
+        if (data_len < PKCS11_CKO_DATA_SLOT_SIZE_MIN ||
+            data_len > PKCS11_CKO_DATA_SLOT_SIZE_MAX) {
+            LT_PKCS11_LOG("Invalid data_len: %lu", data_len);
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+
+        /* Validate slot ID */
+        if (slot_id >= PKCS11_CKO_DATA_SLOT_COUNT) {
+            LT_PKCS11_LOG("Slot ID too high!");
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+    } else if (obj_class == CKO_CERTIFICATE) {
+        /* Validate data size */
+        if (data_len < PKCS11_CKO_CERT_SLOT_SIZE_MIN ||
+            data_len > PKCS11_CKO_CERT_SLOT_SIZE_MAX) {
+            LT_PKCS11_LOG("Invalid data_len: %lu", data_len);
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+
+        /* Validate slot ID */
+        if (slot_id >= PKCS11_CKO_CERT_SLOT_COUNT) {
+            LT_PKCS11_LOG("Slot ID too high!");
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
     }
 
-    LT_PKCS11_LOG("Writing %lu bytes to slot: %lu", data_len, slot_id);
+    /* Handle object-specific operation */
+    if (obj_class == CKO_DATA) {
+        LT_PKCS11_LOG("Writing PKO_DATA: %lu bytes to slot: %lu", data_len, slot_id);
+    
+        lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value,
+        (uint16_t)data_len);
+        if (ret != LT_OK) {
+            LT_PKCS11_LOG("lt_r_mem_data_write failed with: %s", lt_ret_verbose(ret));
+            LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+        }
+        
+        *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_DATA, slot_id);
+        
+        LT_PKCS11_LOG("(handle=0x%lx, slot=%lu)", *phObject, slot_id);
+        LT_PKCS11_RETURN(CKR_OK);
+    } else if (obj_class == CKO_CERTIFICATE) {
+        LT_PKCS11_LOG("Writing PKO_CERTIFICATE: %lu bytes to PKO_CERTIFICATE slot: %lu", data_len, slot_id);
+    
+        size_t r_mem_slot = PKCS11_CKO_CERT_SLOT_BEGIN + (slot_id * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS);
+        size_t data_written = 0;
 
-    lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value,
-                                       (uint16_t)data_len);
-    if (ret != LT_OK) {
-        LT_PKCS11_LOG("lt_r_mem_data_write failed with: %s", lt_ret_verbose(ret));
-        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+        while (data_len != data_written) {
+            size_t length_to_write = lt_min(data_len - data_written, LT_PKCS11_R_MEM_SLOT_SIZE);
+        
+            LT_PKCS11_LOG("Writing %lu bytes of data to R-Mem slot %lu", length_to_write, r_mem_slot);
+            lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle,
+                                                r_mem_slot,
+                                                data_value + data_written,
+                                                length_to_write
+                                                
+            );
+
+            /* First R-Mem slot already full = this PKO_CERTIFICATE slot is occupied */
+            if (ret == LT_L3_SLOT_NOT_EMPTY && data_written == 0) {
+                LT_PKCS11_LOG("PKO_CERTIFICATE slot %lu is full!", slot_id);
+                LT_PKCS11_RETURN(CKR_DEVICE_MEMORY);
+            }
+    
+            if (ret != LT_OK) {
+                LT_PKCS11_LOG("lt_r_mem_data_write failed with: %s", lt_ret_verbose(ret));
+                LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+            }
+    
+            data_written += length_to_write;
+            r_mem_slot++;
+        }
+        
+        *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_CERT, slot_id);
+        
+        LT_PKCS11_LOG("(handle=0x%lx, slot=%lu)", *phObject, slot_id);
+        LT_PKCS11_RETURN(CKR_OK);
     }
 
-    *phObject = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot_id);
-
-    LT_PKCS11_LOG("(handle=0x%lx, slot=%lu)", *phObject, slot_id);
-    LT_PKCS11_RETURN(CKR_OK);
+    LT_PKCS11_LOG("Invalid object class!");
+    LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
 }
 
 CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
@@ -587,15 +671,49 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
     lt_ret_t ret;
 
-    /* Handle R-MEM data objects */
-    if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+    /* Handle CKO_DATA objects */
+    if (PKCS11_IS_VALID_RMEM_DATA_HANDLE(hObject)) {
 
-        LT_PKCS11_LOG("Erasing slot: %u", slot);
+        /* Validate slot ID */
+        if (slot >= PKCS11_CKO_DATA_SLOT_COUNT) {
+            LT_PKCS11_LOG("Slot ID too high!");
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+
+        /* CKO_DATA object slot = single R_MEM slot */
+        LT_PKCS11_LOG("Erasing R-Mem slot: %u", slot);
         ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
 
         if (ret != LT_OK) {
             LT_PKCS11_LOG("lt_r_mem_data_erase failed with: %s", lt_ret_verbose(ret));
             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+        }
+
+        LT_PKCS11_RETURN(CKR_OK);
+    }
+
+    /* Handle CKO_CERTIFICATE objects */
+    if (PKCS11_IS_VALID_RMEM_CERT_HANDLE(hObject)) {
+        
+        /* Validate slot ID */
+        if (slot >= PKCS11_CKO_CERT_SLOT_COUNT) {
+            LT_PKCS11_LOG("Slot ID too high!");
+            LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
+        }
+
+        /* CKO_CERTIFICATE object slot spans over multiple R_MEM slots */
+        size_t r_mem_slot_start = PKCS11_CKO_CERT_SLOT_BEGIN + (slot * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS);
+        LT_PKCS11_LOG("Will erase CKO_CERTIFICATE slot %u, starting at R-Mem slot %lu", slot, r_mem_slot_start);
+
+        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_RMEM_SLOTS; i++) {
+
+            LT_PKCS11_LOG("Erasing R-Mem slot: %lu", r_mem_slot_start + i);
+            ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, r_mem_slot_start + i);
+    
+            if (ret != LT_OK) {
+                LT_PKCS11_LOG("lt_r_mem_data_erase failed with: %s", lt_ret_verbose(ret));
+                LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+            }
         }
 
         LT_PKCS11_RETURN(CKR_OK);
@@ -643,9 +761,133 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
     uint16_t slot = PKCS11_HANDLE_GET_SLOT(hObject);
     CK_RV rv = CKR_OK;
 
-    if (PKCS11_IS_VALID_RMEM_HANDLE(hObject)) {
+    if (PKCS11_IS_VALID_RMEM_CERT_HANDLE(hObject)) {
 
-        uint8_t data_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
+        size_t r_mem_slot_start = PKCS11_CKO_CERT_SLOT_BEGIN + (slot * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS);
+        uint8_t data_buffer[PKCS11_CKO_CERT_SLOT_SIZE_MAX];
+        size_t   data_read_total = 0;
+        uint16_t data_read_slot = 0;
+
+        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_RMEM_SLOTS; i++) {
+
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle,
+                                              r_mem_slot_start + i,
+                                              data_buffer + data_read_total,
+                                              LT_PKCS11_R_MEM_SLOT_SIZE,
+                                              &data_read_slot);
+            
+            if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
+                /* No data at all for this CKO_CERTIFICATE slot */
+                if (i == 0) {
+                    LT_PKCS11_LOG("CKO_CERTIFICATE slot %d is empty!", slot);
+                    LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
+                /* Some data already read => OK */
+                } else {
+                    LT_PKCS11_LOG("Finished reading CKO_CERTIFICATE slot %d.", slot);
+                    break;
+                }
+            }
+
+            /* Different error => terminate */
+            if (ret != LT_OK) {
+                LT_PKCS11_LOG("lt_r_mem_data_read failed with: %s", lt_ret_verbose(ret));
+                LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+            }
+
+            data_read_total += data_read_slot;
+        }
+
+        /* Fill in requested attributes for CKO_CERTIFICATE */
+        for (CK_ULONG i = 0; i < ulCount; i++) {
+            switch (pTemplate[i].type) {
+
+            case CKA_CLASS:
+            {
+                CK_OBJECT_CLASS obj_class = CKO_CERTIFICATE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
+                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
+                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
+            case CKA_LABEL:
+            {
+                /* Generate label for this slot */
+                char label[6]; // Enough to store whole uint16_t.
+                snprintf(label, sizeof(label), "%u", slot);
+                CK_ULONG label_len = strlen(label);
+
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = label_len;
+                } else if (pTemplate[i].ulValueLen >= label_len) {
+                    memcpy(pTemplate[i].pValue, label, label_len);
+                    pTemplate[i].ulValueLen = label_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
+            case CKA_APPLICATION:
+            {
+                const char *application = "TropicSquare";
+                CK_ULONG app_len = strlen(application);
+
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = app_len;
+                } else if (pTemplate[i].ulValueLen >= app_len) {
+                    memcpy(pTemplate[i].pValue, application, app_len);
+                    pTemplate[i].ulValueLen = app_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
+            case CKA_VALUE:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = data_read_total;
+                } else if (pTemplate[i].ulValueLen >= data_read_total) {
+                    memcpy(pTemplate[i].pValue, data_buffer, data_read_total);
+                    pTemplate[i].ulValueLen = data_read_total;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+
+            case CKA_TOKEN:
+            {
+                CK_BBOOL on_token = CK_TRUE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
+            default:
+                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                rv = CKR_ATTRIBUTE_TYPE_INVALID;
+                break;
+            }
+        }
+    } else if (PKCS11_IS_VALID_RMEM_DATA_HANDLE(hObject)) {
+
+        uint8_t data_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t data_size = 0;
 
         lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, data_buf,
@@ -683,7 +925,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             case CKA_LABEL:
             {
                 /* Generate label for this slot */
-                char label[4]; // Max 512 slots
+                char label[6]; // Enough to store uint16_t.
                 snprintf(label, sizeof(label), "%u", slot);
                 CK_ULONG label_len = strlen(label);
 
@@ -1121,7 +1363,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
                    pTemplate[i].pValue &&
                    pTemplate[i].ulValueLen > 0) {
 
-            /* Parse CKA_LABEL as slot number for R-Memory slots */
+            /* Parse CKA_LABEL as slot number for PKO_DATA or PKO_CERTIFICATE slots */
             char temp[16] = {0};
             CK_ULONG copy_len = TRIM_LENGTH(pTemplate[i].ulValueLen, 15);
             memcpy(temp, pTemplate[i].pValue, copy_len);
@@ -1179,6 +1421,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
     *pulObjectCount = 0;
 
     CK_BBOOL search_rmem = CK_FALSE;
+    CK_BBOOL search_cert = CK_FALSE;
     CK_BBOOL search_ecc = CK_FALSE;
 
     if (pkcs11_ctx.find_class_set == CK_TRUE) {
@@ -1187,17 +1430,21 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
             search_ecc = CK_TRUE;
         } else if (pkcs11_ctx.find_class == CKO_DATA) {
             search_rmem = CK_TRUE;
+        } else if (pkcs11_ctx.find_class == CKO_CERTIFICATE) {
+            search_cert = CK_TRUE;
         }
     } else {
-        search_ecc = CK_TRUE;
         search_rmem = CK_TRUE;
+        search_cert = CK_TRUE;
+        search_ecc = CK_TRUE;
     }
 
-    LT_PKCS11_LOG("search_ecc:  %d", search_ecc);
     LT_PKCS11_LOG("search_rmem: %d", search_rmem);
+    LT_PKCS11_LOG("search_cert: %d", search_cert);
+    LT_PKCS11_LOG("search_ecc:  %d", search_ecc);
 
     if (search_rmem) {
-        uint8_t temp_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
+        uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t read_size;
 
         while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX &&
@@ -1218,10 +1465,48 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
                 continue;
             }
 
-            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_RMEM_DATA, slot);
+            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_DATA, slot);
             (*pulObjectCount)++;
 
             printf("Found USER-DATA in R-Memory slot: %u\n", slot);
+        }
+    }
+
+    /* We only need to read the first R-Mem slot of each CKO_CERTIFICATE slot */
+    if (search_cert) {
+        size_t r_mem_slot_start = PKCS11_CKO_CERT_SLOT_BEGIN;
+        uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
+        uint16_t data_read_slot = 0;
+
+        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_COUNT; i++) {
+
+            /* If filtering by slot, skip slots that don't match */
+            if (pkcs11_ctx.find_slot_set && i != (uint16_t)pkcs11_ctx.find_slot) {
+                continue;
+            }
+
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle,
+                                              r_mem_slot_start + (i * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS),
+                                              temp_buf,
+                                              LT_PKCS11_R_MEM_SLOT_SIZE,
+                                              &data_read_slot);
+            
+            /* Skip empty CKO_CERTIFICATE slots */
+            if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
+                LT_PKCS11_LOG("CKO_CERTIFICATE slot %lu is empty.", i);
+                continue;
+            }
+
+            /* Different error => terminate */
+            if (ret != LT_OK) {
+                LT_PKCS11_LOG("lt_r_mem_data_read failed with: %s", lt_ret_verbose(ret));
+                LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+            }
+
+            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_CERT, i);
+            (*pulObjectCount)++;
+
+            printf("Found CKO_CERTIFICATE in slot: %lu\n", i);
         }
     }
 
