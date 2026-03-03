@@ -1317,6 +1317,40 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 pTemplate[i].ulValueLen = 0;
                 break;
 
+            case CKA_TOKEN:
+            {
+                LT_PKCS11_LOG("CKA_TOKEN");
+                CK_BBOOL on_token = CK_TRUE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
+            case CKA_COPYABLE:
+            {
+                LT_PKCS11_LOG("CKA_COPYABLE");
+                
+                /* Keys cannot be copied from the hardware token */
+                CK_BBOOL copyable = CK_FALSE;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+                    memcpy(pTemplate[i].pValue, &copyable, sizeof(CK_BBOOL));
+                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+            }
+
             default:
                 pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 rv = CKR_ATTRIBUTE_TYPE_INVALID;
