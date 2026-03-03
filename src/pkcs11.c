@@ -320,7 +320,7 @@ CK_RV C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
     strncpy((char*)pInfo->manufacturerID, "TropicSquare", 32);
 
     /* Token capabilities - mark as fully initialized with RNG */
-    pInfo->flags = CKF_RNG | CKF_TOKEN_INITIALIZED | CKF_USER_PIN_INITIALIZED;
+    pInfo->flags = CKF_RNG | CKF_TOKEN_INITIALIZED;
 
     /* Session limits */
     pInfo->ulMaxSessionCount = 1;      /* We support only one session at a time */
