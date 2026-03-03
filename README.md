@@ -215,8 +215,6 @@ If you have an engineering sample TROPIC01, you need to redefine macros in `pkcs
 - `LT_PKCS11_SH0_PRIV` to `sh0priv_eng_sample`
 - `LT_PKCS11_SH0_PUB` to `sh0pub_eng_sample`
 
-If you have custom-provisioned chips, pass arrays with your own keys.
-
 Read more about pairing keys in the [Libtropic documentation](https://tropicsquare.github.io/libtropic/latest/reference/default_pairing_keys/).
 
 ## Troubleshooting
