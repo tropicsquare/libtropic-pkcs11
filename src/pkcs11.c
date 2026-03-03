@@ -1521,7 +1521,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t data_read_slot = 0;
 
-        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_COUNT; i++) {
+        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_COUNT && *pulObjectCount < ulMaxObjectCount; i++) {
 
             /* If filtering by slot, skip slots that don't match */
             if (pkcs11_ctx.find_slot_set && i != (uint16_t)pkcs11_ctx.find_slot) {
