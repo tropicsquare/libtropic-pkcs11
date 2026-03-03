@@ -272,9 +272,11 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKA_LOCAL                               0x00000163  /**< True if key was generated locally */
 #define CKA_NEVER_EXTRACTABLE                   0x00000164  /**< True if key was never extractable */
 #define CKA_ALWAYS_SENSITIVE                    0x00000165  /**< True if key was always sensitive */
+#define CKA_COPYABLE                            0x00000171  /**< True if object can be copied */
 #define CKA_ALWAYS_AUTHENTICATE                 0x00000202  /**< True if auth required for each use */
 #define CKA_EC_PARAMS                           0x00000180  /**< EC curve parameters (DER) */
 #define CKA_EC_POINT                            0x00000181  /**< EC public key point (DER OCTET STRING) */
+#define CKA_ALLOWED_MECHANISMS                  0x40000600  /**< List of supported mechnisms */
 
 /* ---------------------------------------------------------------------------
  * SESSION FLAGS
