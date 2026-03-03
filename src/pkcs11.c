@@ -835,6 +835,18 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 break;
             }
 
+            case CKA_ID:
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = 1;
+                } else if (pTemplate[i].ulValueLen >= 1) {
+                    *((uint8_t*)pTemplate[i].pValue) = slot;
+                    pTemplate[i].ulValueLen = 1;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
+                }
+                break;
+
             case CKA_APPLICATION:
             {
                 const char *application = "TropicSquare";
