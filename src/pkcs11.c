@@ -1352,6 +1352,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             }
 
             default:
+                LT_PKCS11_LOG("Unknown attribute 0x%lx, returning CKR_ATTRIBUTE_TYPE_INVALID", pTemplate[i].type);
                 pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                 rv = CKR_ATTRIBUTE_TYPE_INVALID;
                 break;
