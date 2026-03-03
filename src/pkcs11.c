@@ -1106,10 +1106,6 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 /* Format: 04 <len> 04 <X> <Y> */
                 /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
                 /* For Ed25519: 04 21 04 <32 bytes> = 35 bytes total */
-                if (is_private) {
-                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                    rv = CKR_ATTRIBUTE_TYPE_INVALID;
-                } else {
                     /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
                     /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
                     /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
@@ -1139,7 +1135,6 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                     } else {
                         pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
                         rv = CKR_BUFFER_TOO_SMALL;
-                    }
                 }
                 break;
             }
