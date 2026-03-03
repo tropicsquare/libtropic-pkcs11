@@ -1106,35 +1106,35 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                 /* Format: 04 <len> 04 <X> <Y> */
                 /* For P-256: 04 41 04 <32 bytes X> <32 bytes Y> = 67 bytes total */
                 /* For Ed25519: 04 21 04 <32 bytes> = 35 bytes total */
-                    /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
-                    /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
-                    /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
-                    uint8_t ec_point[68];  /* Max size: 04 41 04 + 64 bytes */
-                    CK_ULONG ec_point_len;
+                /* Build DER OCTET STRING: 04 <len> <uncompressed_point> */
+                /* Uncompressed point is: 04 <X> <Y> for P-256 (65 bytes) */
+                /*                    or: <Y> for Ed25519 (32 bytes, no prefix) */
+                uint8_t ec_point[68];  /* Max size: 04 41 04 + 64 bytes */
+                CK_ULONG ec_point_len;
 
-                    if (curve == TR01_CURVE_P256) {
-                        /* P-256: OCTET STRING { 04 || X || Y } */
-                        ec_point[0] = 0x04;  /* OCTET STRING tag */
-                        ec_point[1] = 65;    /* Length: 1 + 64 */
-                        ec_point[2] = 0x04;  /* Uncompressed point marker */
-                        memcpy(&ec_point[3], pubkey_buf, 64);
-                        ec_point_len = 67;
-                    } else {
-                        /* Ed25519: OCTET STRING { Y } */
-                        ec_point[0] = 0x04;  /* OCTET STRING tag */
-                        ec_point[1] = 32;    /* Length */
-                        memcpy(&ec_point[2], pubkey_buf, 32);
-                        ec_point_len = 34;
-                    }
+                if (curve == TR01_CURVE_P256) {
+                    /* P-256: OCTET STRING { 04 || X || Y } */
+                    ec_point[0] = 0x04;  /* OCTET STRING tag */
+                    ec_point[1] = 65;    /* Length: 1 + 64 */
+                    ec_point[2] = 0x04;  /* Uncompressed point marker */
+                    memcpy(&ec_point[3], pubkey_buf, 64);
+                    ec_point_len = 67;
+                } else {
+                    /* Ed25519: OCTET STRING { Y } */
+                    ec_point[0] = 0x04;  /* OCTET STRING tag */
+                    ec_point[1] = 32;    /* Length */
+                    memcpy(&ec_point[2], pubkey_buf, 32);
+                    ec_point_len = 34;
+                }
 
-                    if (pTemplate[i].pValue == NULL) {
-                        pTemplate[i].ulValueLen = ec_point_len;
-                    } else if (pTemplate[i].ulValueLen >= ec_point_len) {
-                        memcpy(pTemplate[i].pValue, ec_point, ec_point_len);
-                        pTemplate[i].ulValueLen = ec_point_len;
-                    } else {
-                        pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
-                        rv = CKR_BUFFER_TOO_SMALL;
+                if (pTemplate[i].pValue == NULL) {
+                    pTemplate[i].ulValueLen = ec_point_len;
+                } else if (pTemplate[i].ulValueLen >= ec_point_len) {
+                    memcpy(pTemplate[i].pValue, ec_point, ec_point_len);
+                    pTemplate[i].ulValueLen = ec_point_len;
+                } else {
+                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
+                    rv = CKR_BUFFER_TOO_SMALL;
                 }
                 break;
             }
