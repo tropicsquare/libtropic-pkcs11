@@ -71,7 +71,7 @@ openssl req -verbose -new \
             -out tropic01-client.csr 
 ```
 
-You can modify `-subj` to your linking depending on your setup.
+You can modify the `-subj` value as needed for your setup. 
 
 If everything went correct, you will have the CSR ready in the `tropic01-client.csr` file.
 
@@ -175,7 +175,7 @@ redirect-gateway def1
 
 **7. Connect to your OpenVPN with the configuration.**
 
-Assuming you stored you client's configuration in `tropic01-client.ovpn`, run:
+Assuming you stored your client's configuration in `tropic01-client.ovpn`, run:  
 
 ```sh
 sudo openvpn --config tropic01-client.ovpn
