@@ -276,7 +276,6 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKA_ALWAYS_AUTHENTICATE                 0x00000202  /**< True if auth required for each use */
 #define CKA_EC_PARAMS                           0x00000180  /**< EC curve parameters (DER) */
 #define CKA_EC_POINT                            0x00000181  /**< EC public key point (DER OCTET STRING) */
-#define CKA_ALLOWED_MECHANISMS                  0x40000600  /**< List of supported mechnisms */
 
 /* ---------------------------------------------------------------------------
  * SESSION FLAGS
