@@ -622,7 +622,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         while (data_len != data_written) {
             size_t length_to_write = lt_min(data_len - data_written, LT_PKCS11_R_MEM_SLOT_SIZE);
         
-            LT_PKCS11_LOG("Writing %lu bytes of data to R-Mem slot %lu", length_to_write, r_mem_slot);
+            LT_PKCS11_LOG("Writing %zu bytes of data to R-Mem slot %lu", length_to_write, r_mem_slot);
             lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle,
                                                 r_mem_slot,
                                                 data_value + data_written,
@@ -704,11 +704,11 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 
         /* CKO_CERTIFICATE object slot spans over multiple R_MEM slots */
         size_t r_mem_slot_start = PKCS11_CKO_CERT_SLOT_BEGIN + (slot * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS);
-        LT_PKCS11_LOG("Will erase CKO_CERTIFICATE slot %u, starting at R-Mem slot %lu", slot, r_mem_slot_start);
+        LT_PKCS11_LOG("Will erase CKO_CERTIFICATE slot %u, starting at R-Mem slot %zu", slot, r_mem_slot_start);
 
         for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_RMEM_SLOTS; i++) {
 
-            LT_PKCS11_LOG("Erasing R-Mem slot: %lu", r_mem_slot_start + i);
+            LT_PKCS11_LOG("Erasing R-Mem slot: %zu", r_mem_slot_start + i);
             ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, r_mem_slot_start + i);
     
             if (ret != LT_OK) {
@@ -780,11 +780,11 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
             if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
                 /* No data at all for this CKO_CERTIFICATE slot */
                 if (i == 0) {
-                    LT_PKCS11_LOG("CKO_CERTIFICATE slot %d is empty!", slot);
+                    LT_PKCS11_LOG("CKO_CERTIFICATE slot %u is empty!", slot);
                     LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
                 /* Some data already read => OK */
                 } else {
-                    LT_PKCS11_LOG("Finished reading CKO_CERTIFICATE slot %d.", slot);
+                    LT_PKCS11_LOG("Finished reading CKO_CERTIFICATE slot %u.", slot);
                     break;
                 }
             }
@@ -907,7 +907,7 @@ CK_RV C_GetAttributeValue(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject,
                                           sizeof(data_buf), &data_size);
 
         if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
-            LT_PKCS11_LOG("lt_r_mem_data_read: Slot %d is empty", slot);
+            LT_PKCS11_LOG("lt_r_mem_data_read: Slot %u is empty", slot);
             LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
         }
 
