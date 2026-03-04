@@ -101,6 +101,7 @@ typedef struct {
     uint16_t                    find_rmem_index;
     uint8_t                     find_ecc_index;
     CK_BBOOL                    find_ecc_done;
+    CK_ULONG                    find_cert_index;
     CK_OBJECT_CLASS             find_class;
     CK_BBOOL                    find_class_set;
     CK_BBOOL                    find_slot_set;
@@ -1387,6 +1388,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
+    pkcs11_ctx.find_cert_index = 0;
 
     pkcs11_ctx.find_slot = 0;
     pkcs11_ctx.find_slot_set = CK_FALSE;
@@ -1521,22 +1523,24 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t data_read_slot = 0;
 
-        for (size_t i = 0; i < PKCS11_CKO_CERT_SLOT_COUNT && *pulObjectCount < ulMaxObjectCount; i++) {
+        while (pkcs11_ctx.find_cert_index < PKCS11_CKO_CERT_SLOT_COUNT && *pulObjectCount < ulMaxObjectCount) {
+
+            CK_ULONG current_index = pkcs11_ctx.find_cert_index++;
 
             /* If filtering by slot, skip slots that don't match */
-            if (pkcs11_ctx.find_slot_set && i != (uint16_t)pkcs11_ctx.find_slot) {
+            if (pkcs11_ctx.find_slot_set && current_index != pkcs11_ctx.find_slot) {
                 continue;
             }
 
             lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle,
-                                              r_mem_slot_start + (i * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS),
+                                              r_mem_slot_start + (current_index * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS),
                                               temp_buf,
                                               LT_PKCS11_R_MEM_SLOT_SIZE,
                                               &data_read_slot);
             
             /* Skip empty CKO_CERTIFICATE slots */
             if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
-                LT_PKCS11_LOG("CKO_CERTIFICATE slot %lu is empty.", i);
+                LT_PKCS11_LOG("CKO_CERTIFICATE slot %lu is empty.", current_index);
                 continue;
             }
 
@@ -1546,10 +1550,10 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
                 LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
             }
 
-            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_CERT, i);
+            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CKO_CERT, current_index);
             (*pulObjectCount)++;
 
-            printf("Found CKO_CERTIFICATE in slot: %lu\n", i);
+            printf("Found CKO_CERTIFICATE in slot: %lu\n", current_index);
         }
     }
 
@@ -1635,6 +1639,7 @@ CK_RV C_FindObjectsFinal(CK_SESSION_HANDLE hSession)
     pkcs11_ctx.find_rmem_index = 0;
     pkcs11_ctx.find_ecc_index = 0;
     pkcs11_ctx.find_ecc_done = CK_FALSE;
+    pkcs11_ctx.find_cert_index = 0;
 
     pkcs11_ctx.find_class = 0;
     pkcs11_ctx.find_class_set = CK_FALSE;
