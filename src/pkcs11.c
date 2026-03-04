@@ -600,7 +600,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
 
     /* Handle object-specific operation */
     if (obj_class == CKO_DATA) {
-        LT_PKCS11_LOG("Writing PKO_DATA: %lu bytes to slot: %lu", data_len, slot_id);
+        LT_PKCS11_LOG("Writing CKO_DATA: %lu bytes to slot: %lu", data_len, slot_id);
     
         lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value,
         (uint16_t)data_len);
@@ -614,7 +614,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         LT_PKCS11_LOG("(handle=0x%lx, slot=%lu)", *phObject, slot_id);
         LT_PKCS11_RETURN(CKR_OK);
     } else if (obj_class == CKO_CERTIFICATE) {
-        LT_PKCS11_LOG("Writing PKO_CERTIFICATE: %lu bytes to PKO_CERTIFICATE slot: %lu", data_len, slot_id);
+        LT_PKCS11_LOG("Writing CKO_CERTIFICATE: %lu bytes to CKO_CERTIFICATE slot: %lu", data_len, slot_id);
     
         size_t r_mem_slot = PKCS11_CKO_CERT_SLOT_BEGIN + (slot_id * PKCS11_CKO_CERT_SLOT_RMEM_SLOTS);
         size_t data_written = 0;
@@ -630,9 +630,9 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
                                                 
             );
 
-            /* First R-Mem slot already full = this PKO_CERTIFICATE slot is occupied */
+            /* First R-Mem slot already full = this CKO_CERTIFICATE slot is occupied */
             if (ret == LT_L3_SLOT_NOT_EMPTY && data_written == 0) {
-                LT_PKCS11_LOG("PKO_CERTIFICATE slot %lu is full!", slot_id);
+                LT_PKCS11_LOG("CKO_CERTIFICATE slot %lu is full!", slot_id);
                 LT_PKCS11_RETURN(CKR_DEVICE_MEMORY);
             }
     
@@ -1408,7 +1408,7 @@ CK_RV C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, 
                    pTemplate[i].pValue &&
                    pTemplate[i].ulValueLen > 0) {
 
-            /* Parse CKA_LABEL as slot number for PKO_DATA or PKO_CERTIFICATE slots */
+            /* Parse CKA_LABEL as slot number for CKO_DATA or CKO_CERTIFICATE slots */
             char temp[16] = {0};
             CK_ULONG copy_len = TRIM_LENGTH(pTemplate[i].ulValueLen, 15);
             memcpy(temp, pTemplate[i].pValue, copy_len);
