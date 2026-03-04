@@ -161,7 +161,8 @@ All operations require explicit slot specification via `--label`:
 
 | Object Type       | Slot Range | Attribute      | Example                             |
 |-------------------|------------|----------------|-------------------------------------|
-| User Data (R-MEM) | 0-511      | `--label "60"` | `--type data --label "60"`          |
+| User Data (R-MEM) | 0-491      | `--label "60"` | `--type data --label "60"`          |
+| Certificates      | 0-1        | `--label "0"`  | `--type cert --label "0"`           |
 | ECC Keys          | 0-31       | `--label "24"` | `--keypairgen --label "24"`         |
 | Signing*          | 0-31       | `--id "18"`    | `--sign --id "18"` (slot 24 = 0x18) |
 
