@@ -149,8 +149,11 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type privkey --id "18"
 ```
 
-### Use the TROPIC01 DevKit to log in to an SSH server
+### Use the TROPIC01 USB DevKit to log in to an SSH server
 Refer to the [Using libtropic-pkcs11 with OpenSSH](examples/openssh/README.md) tutorial.
+
+### Use the TROPIC01 USB DevKit to log in to an OpenVPN server
+Refer to the [Using libtropic-pkcs11 with OpenVPN](examples/openvpn/README.md) tutorial.
 
 ## Slot Specification
 
