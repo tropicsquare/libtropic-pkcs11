@@ -602,7 +602,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
     if (obj_class == CKO_DATA) {
         LT_PKCS11_LOG("Writing CKO_DATA: %lu bytes to slot: %lu", data_len, slot_id);
     
-        lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, (uint16_t)slot_id, data_value,
+        lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle, PKCS11_CKO_DATA_SLOT_BEGIN + (slot_id * PKCS11_CKO_DATA_SLOT_RMEM_SLOTS), data_value,
         (uint16_t)data_len);
         if (ret != LT_OK) {
             LT_PKCS11_LOG("lt_r_mem_data_write failed with: %s", lt_ret_verbose(ret));
@@ -683,7 +683,7 @@ CK_RV C_DestroyObject(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject)
 
         /* CKO_DATA object slot = single R_MEM slot */
         LT_PKCS11_LOG("Erasing R-Mem slot: %u", slot);
-        ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, slot);
+        ret = lt_r_mem_data_erase(&pkcs11_ctx.lt_handle, PKCS11_CKO_DATA_SLOT_BEGIN + (slot * PKCS11_CKO_DATA_SLOT_RMEM_SLOTS));
 
         if (ret != LT_OK) {
             LT_PKCS11_LOG("lt_r_mem_data_erase failed with: %s", lt_ret_verbose(ret));
@@ -1492,7 +1492,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t read_size;
 
-        while (pkcs11_ctx.find_rmem_index <= TR01_R_MEM_DATA_SLOT_MAX &&
+        while (pkcs11_ctx.find_rmem_index <= PKCS11_CKO_DATA_SLOT_COUNT &&
                *pulObjectCount < ulMaxObjectCount) {
 
             uint16_t slot = pkcs11_ctx.find_rmem_index++;
@@ -1502,7 +1502,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
                 continue;
             }
 
-            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, slot, temp_buf,
+            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, PKCS11_CKO_DATA_SLOT_BEGIN + (slot * PKCS11_CKO_DATA_SLOT_RMEM_SLOTS), temp_buf,
                                               sizeof(temp_buf), &read_size);
 
             /* Skip empty slots (LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) */
