@@ -23,6 +23,7 @@ Notes:
 
 - The server and the client can be the same machine.
 - To quickly get OpenVPN server working, you can use [this Docker container](https://github.com/kylemanna/docker-openvpn). It also includes EasyRSA.
+- You will need TROPIC01 USB DevKit with free first EC and certificate slot. It's best if you pick a devkit which you do not use for anything else or which does not contain any important key or certificate in the first slot.
 
 ## Overview
 
@@ -46,7 +47,7 @@ Follow instructions in the [root README.md](../../README.md).
 pkcs11-tool --module ./libtropic_pkcs11.so --keypairgen --key-type EC:secp256r1 --id "0"
 ```
 
-You can choose a different slot by changing the `id` parameter: `--id <number>`.
+Do not change the `id`. The implementation currently supports only the slot 0 for usage with OpenVPN.
 
 **3. Create a CSR**
 
@@ -70,10 +71,7 @@ openssl req -verbose -new \
             -out tropic01-client.csr 
 ```
 
-Notes:
-
-- If you generated the keypair to a different slot, you have to modify `id=` in the `-key` parameter.
-- You can modify `-subj` to your linking depending on your setup.
+You can modify `-subj` to your linking depending on your setup.
 
 If everything went correct, you will have the CSR ready in the `tropic01-client.csr` file.
 
@@ -106,6 +104,8 @@ openssl x509 -in tropic01-client.crt -outform der -out tropic01-client.der
 # Store the certificate to TROPIC01.
 pkcs11-tool --module ./libtropic_pkcs11.so --write-object ./tropic01-client.der --type cert --label 0
 ```
+
+Note: Do not change the label. It is used to identify certificate slot and currently the implementation supports only the slot 0 for usage with OpenVPN.
 
 **6. Prepare OpenVPN client configuration**
 
@@ -186,8 +186,7 @@ Now you should be connected to your OpenVPN server using TROPIC01 as an authenti
 ## Common problems and troubleshooting
 
 ### I cannot generate the key (`CKR_DEVICE_ERROR` or `CKR_DEVICE_MEMORY`)
-The slot you have selected (with `--id <number>`) is already in use. Either choose a different slot
-or delete the key in the slot if you do not need it:
+The EC key slot 0 is already in use. If you do not need the key in the slot, delete it to make space:
 
 ```sh
 pkcs11-tool --module ./libtropic_pkcs11.so --delete-object --type privkey --id <number>
@@ -198,8 +197,8 @@ pkcs11-tool --module ./libtropic_pkcs11.so --delete-object --type privkey --id <
 There are two possibilities:
 - The certificate is too large. Size of single certificate slot is 4440 bytes (~4.3 KiB).
     - You probably used several optional fields. Try to minimize the contents of the certificate.
-- The certificate slot you have selected is already in use.
-    - Pick another slot or delete the cert in the slot (if you do not need it):
+- The certificate slot 0 is already in use.
+    - If you do not need the existing certificate, delete it to make space:
       ```sh
       pkcs11-tool --module ./libtropic_pkcs11.so --delete-object --type cert --id <number>
       ```
