@@ -185,11 +185,11 @@ All operations require explicit slot specification via `--label`:
 | `C_CloseSession`        |  ✅    | Close a session                            |
 | `C_Login`               |  ✅    | No-op (auth via pairing keys)              |
 | `C_Logout`              |  ✅    | No-op                                      |
-| `C_CreateObject`        |  ✅    | Write data to R-MEM slot                   |
-| `C_DestroyObject`       |  ✅    | Erase R-MEM slot or ECC key                |
-| `C_GetAttributeValue`   |  ✅    | Read data/key attributes                   |
+| `C_CreateObject`        |  ✅    | Write certs, keys or arbitrary user data   |
+| `C_DestroyObject`       |  ✅    | Delete certs, keys or arbitrary user data  |
+| `C_GetAttributeValue`   |  ✅    | Read attributes (of keys, certs, data)     |
 | `C_FindObjectsInit`     |  ✅    | Start object search                        |
-| `C_FindObjects`         |  ✅    | Find objects (R-MEM/keys)                  |
+| `C_FindObjects`         |  ✅    | Find objects (keys, certs, data)           |
 | `C_FindObjectsFinal`    |  ✅    | End object search                          |
 | `C_GenerateKeyPair`     |  ✅    | Generate P-256 or Ed25519 key pair         |
 | `C_SignInit`            |  ✅    | Initialize ECDSA/EdDSA signing             |
