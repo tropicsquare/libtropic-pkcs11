@@ -319,12 +319,15 @@ typedef CK_ULONG CK_KEY_TYPE;
  * Flags in CK_SLOT_INFO.flags and CK_TOKEN_INFO.flags describing
  * capabilities and state.
  */
+/* Slot flags (CK_SLOT_INFO.flags) */
 #define CKF_TOKEN_PRESENT                       0x00000001  /**< Token is in the slot */
-#define CKF_TOKEN_INITIALIZED                   0x00000004  /**< Token has been initialized */
 #define CKF_HW_SLOT                             0x00000004  /**< Hardware slot (not virtual) */
-#define CKF_RNG                                 0x00000008  /**< Token has RNG */
-#define CKF_LOGIN_REQUIRED                      0x00000100  /**< Login required for private objects */
-#define CKF_USER_PIN_INITIALIZED                0x00000400  /**< User PIN has been set */
+
+/* Token flags (CK_TOKEN_INFO.flags) — values per OASIS PKCS#11 v2.40 */
+#define CKF_RNG                                 0x00000001  /**< Token has RNG */
+#define CKF_LOGIN_REQUIRED                      0x00000004  /**< Login required for private objects */
+#define CKF_USER_PIN_INITIALIZED                0x00000008  /**< User PIN has been set */
+#define CKF_TOKEN_INITIALIZED                   0x00000400  /**< Token has been initialized */
 
 /* ---------------------------------------------------------------------------
  * STRUCTURES
