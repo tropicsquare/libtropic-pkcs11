@@ -272,6 +272,7 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKA_LOCAL                               0x00000163  /**< True if key was generated locally */
 #define CKA_NEVER_EXTRACTABLE                   0x00000164  /**< True if key was never extractable */
 #define CKA_ALWAYS_SENSITIVE                    0x00000165  /**< True if key was always sensitive */
+#define CKA_COPYABLE                            0x00000171  /**< True if object can be copied */
 #define CKA_ALWAYS_AUTHENTICATE                 0x00000202  /**< True if auth required for each use */
 #define CKA_EC_PARAMS                           0x00000180  /**< EC curve parameters (DER) */
 #define CKA_EC_POINT                            0x00000181  /**< EC public key point (DER OCTET STRING) */
@@ -314,16 +315,19 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKF_EC_F_2M                             0x00200000  /**< EC over F2m */
 
 /* ---------------------------------------------------------------------------
- * SLOT AND TOKEN FLAGS
+ * SLOT FLAGS
  * --------------------------------------------------------------------------
- * Flags in CK_SLOT_INFO.flags and CK_TOKEN_INFO.flags describing
- * capabilities and state.
+ * Flags in CK_SLOT_INFO.flags describing capabilities and state.
  */
 /* Slot flags (CK_SLOT_INFO.flags) */
 #define CKF_TOKEN_PRESENT                       0x00000001  /**< Token is in the slot */
 #define CKF_HW_SLOT                             0x00000004  /**< Hardware slot (not virtual) */
 
-/* Token flags (CK_TOKEN_INFO.flags) — values per OASIS PKCS#11 v2.40 */
+/* ---------------------------------------------------------------------------
+ * TOKEN FLAGS
+ * --------------------------------------------------------------------------
+ * Token flags (CK_TOKEN_INFO.flags) — values per OASIS PKCS#11 v2.40
+ */
 #define CKF_RNG                                 0x00000001  /**< Token has RNG */
 #define CKF_LOGIN_REQUIRED                      0x00000004  /**< Login required for private objects */
 #define CKF_USER_PIN_INITIALIZED                0x00000008  /**< User PIN has been set */

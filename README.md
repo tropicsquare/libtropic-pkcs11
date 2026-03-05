@@ -149,8 +149,11 @@ pkcs11-tool --module ./build/libtropic_pkcs11.so \
     --delete-object --type privkey --id "18"
 ```
 
-### Use the TROPIC01 DevKit to log in to an SSH server
+### Use the TROPIC01 USB DevKit to log in to an SSH server
 Refer to the [Using libtropic-pkcs11 with OpenSSH](examples/openssh/README.md) tutorial.
+
+### Use the TROPIC01 USB DevKit to log in to an OpenVPN server
+Refer to the [Using libtropic-pkcs11 with OpenVPN](examples/openvpn/README.md) tutorial.
 
 ## Slot Specification
 
@@ -158,7 +161,8 @@ All operations require explicit slot specification via `--label`:
 
 | Object Type       | Slot Range | Attribute      | Example                             |
 |-------------------|------------|----------------|-------------------------------------|
-| User Data (R-MEM) | 0-511      | `--label "60"` | `--type data --label "60"`          |
+| User Data (R-MEM) | 0-491      | `--label "60"` | `--type data --label "60"`          |
+| Certificates      | 0-1        | `--label "0"`  | `--type cert --label "0"`           |
 | ECC Keys          | 0-31       | `--label "24"` | `--keypairgen --label "24"`         |
 | Signing*          | 0-31       | `--id "18"`    | `--sign --id "18"` (slot 24 = 0x18) |
 
@@ -181,11 +185,11 @@ All operations require explicit slot specification via `--label`:
 | `C_CloseSession`        |  ✅    | Close a session                            |
 | `C_Login`               |  ✅    | No-op (auth via pairing keys)              |
 | `C_Logout`              |  ✅    | No-op                                      |
-| `C_CreateObject`        |  ✅    | Write data to R-MEM slot                   |
-| `C_DestroyObject`       |  ✅    | Erase R-MEM slot or ECC key                |
-| `C_GetAttributeValue`   |  ✅    | Read data/key attributes                   |
+| `C_CreateObject`        |  ✅    | Write certs or arbitrary user data         |
+| `C_DestroyObject`       |  ✅    | Delete certs, keys or arbitrary user data  |
+| `C_GetAttributeValue`   |  ✅    | Read attributes (of keys, certs, data)     |
 | `C_FindObjectsInit`     |  ✅    | Start object search                        |
-| `C_FindObjects`         |  ✅    | Find objects (R-MEM/keys)                  |
+| `C_FindObjects`         |  ✅    | Find objects (keys, certs, data)           |
 | `C_FindObjectsFinal`    |  ✅    | End object search                          |
 | `C_GenerateKeyPair`     |  ✅    | Generate P-256 or Ed25519 key pair         |
 | `C_SignInit`            |  ✅    | Initialize ECDSA/EdDSA signing             |
