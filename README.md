@@ -185,7 +185,7 @@ All operations require explicit slot specification via `--label`:
 | `C_CloseSession`        |  ✅    | Close a session                            |
 | `C_Login`               |  ✅    | No-op (auth via pairing keys)              |
 | `C_Logout`              |  ✅    | No-op                                      |
-| `C_CreateObject`        |  ✅    | Write certs, keys or arbitrary user data   |
+| `C_CreateObject`        |  ✅    | Write certs or arbitrary user data         |
 | `C_DestroyObject`       |  ✅    | Delete certs, keys or arbitrary user data  |
 | `C_GetAttributeValue`   |  ✅    | Read attributes (of keys, certs, data)     |
 | `C_FindObjectsInit`     |  ✅    | Start object search                        |
