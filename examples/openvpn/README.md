@@ -49,7 +49,9 @@ pkcs11-tool --module ./libtropic_pkcs11.so --keypairgen --key-type EC:secp256r1 
 
 Do not change the `id`. The implementation currently supports only the slot 0 for usage with OpenVPN.
 
-**3. Create a CSR**
+**3. Create a CSR using OpenSSL**
+
+In this step, we will create a Certificate Signing Request using OpenSSL. The Certificate Signing Request will be signed by TROPIC01.
 
 You will need a custom OpenSSL configuration to enable Libtropic PKCS#11 support. We prepared a sample configuration
 in the `openssl_pkcs11.cnf` file. You will need to check and modify the two lines in the `[pkcs11_sect]` section of the config:
@@ -59,7 +61,7 @@ module = /usr/lib64/ossl-modules/pkcs11.so # Path to pkcs11prov module (provided
 pkcs11-module-path = ./libtropic_pkcs11.so # Path to Libtropic PKCS#11 module.
 ```
 
-After you have prepared the configuration, create a CSR:
+After you have prepared the configuration for OpenSSL, create a CSR:
 
 ```sh
 export OPENSSL_CONF="<path to openssl_pkcs11.cnf>"
