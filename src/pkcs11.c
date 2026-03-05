@@ -622,7 +622,7 @@ CK_RV C_CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate,
         while (data_len != data_written) {
             size_t length_to_write = lt_min(data_len - data_written, LT_PKCS11_R_MEM_SLOT_SIZE);
         
-            LT_PKCS11_LOG("Writing %zu bytes of data to R-Mem slot %lu", length_to_write, r_mem_slot);
+            LT_PKCS11_LOG("Writing %zu bytes of data to R-Mem slot %zu", length_to_write, r_mem_slot);
             lt_ret_t ret = lt_r_mem_data_write(&pkcs11_ctx.lt_handle,
                                                 r_mem_slot,
                                                 data_value + data_written,
@@ -1492,7 +1492,7 @@ CK_RV C_FindObjects(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject,
         uint8_t temp_buf[LT_PKCS11_R_MEM_SLOT_SIZE];
         uint16_t read_size;
 
-        while (pkcs11_ctx.find_rmem_index <= PKCS11_CKO_DATA_SLOT_COUNT &&
+        while (pkcs11_ctx.find_rmem_index < PKCS11_CKO_DATA_SLOT_COUNT &&
                *pulObjectCount < ulMaxObjectCount) {
 
             uint16_t slot = pkcs11_ctx.find_rmem_index++;
