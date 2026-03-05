@@ -1,6 +1,6 @@
 # Using libtropic-pkcs11 with OpenVPN
 
-This tutorial shows how to use libtropic-pkcs11 provider to authenticate to an OpenVPN server using TROPIC01 USB DevKit on Linux machine.
+This tutorial shows how to use libtropic-pkcs11 provider to authenticate to an OpenVPN server using TROPIC01 USB DevKit on a Linux machine.
 
 ## Prerequisites
 
@@ -73,7 +73,7 @@ openssl req -verbose -new \
 
 You can modify the `-subj` value as needed for your setup. 
 
-If everything went correct, you will have the CSR ready in the `tropic01-client.csr` file.
+If everything went correctly, you will have the CSR ready in the `tropic01-client.csr` file.
 
 You can optionally verify the signature in the CSR is correct:
 
