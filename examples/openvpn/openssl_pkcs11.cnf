@@ -1,0 +1,24 @@
+#
+# OpenSSL configuration file with Libtropic PKCS#11 support enabled.
+#
+
+HOME			= .
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+# List of providers to load
+[provider_sect]
+default = default_sect
+pkcs11 = pkcs11_sect
+
+[default_sect]
+activate = 1
+
+[pkcs11_sect]
+identity = pkcs11
+module = /usr/lib64/ossl-modules/pkcs11.so # Path to pkcs11prov module (provided by libp11).
+pkcs11-module-path = ./libtropic_pkcs11.so # Path to Libtropic PKCS#11 module.
+activate = 1
