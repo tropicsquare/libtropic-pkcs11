@@ -1889,9 +1889,10 @@ CK_RV C_Sign(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
 
 /* Supported mechanisms */
 static const CK_MECHANISM_TYPE supported_mechanisms[] = {
-    CKM_EC_KEY_PAIR_GEN,  /* ECC key generation */
-    CKM_ECDSA,            /* ECDSA signing */
-    CKM_EDDSA             /* EdDSA signing */
+    CKM_EC_KEY_PAIR_GEN,            /* ECC key generation (Weierstrass curve) */
+    CKM_ECDSA,                      /* ECDSA signing */
+    CKM_EC_EDWARDS_KEY_PAIR_GEN,    /* ECC key generation (Edwards curve) */
+    CKM_EDDSA                       /* EdDSA signing */
 };
 #define NUM_MECHANISMS (sizeof(supported_mechanisms) / sizeof(supported_mechanisms[0]))
 
@@ -1953,6 +1954,11 @@ CK_RV C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type,
 
     switch (type) {
     case CKM_EC_KEY_PAIR_GEN:
+        pInfo->ulMinKeySize = 256;
+        pInfo->ulMaxKeySize = 256;
+        pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_F_P;
+        break;
+    case CKM_EC_EDWARDS_KEY_PAIR_GEN:
         pInfo->ulMinKeySize = 256;
         pInfo->ulMaxKeySize = 256;
         pInfo->flags = CKF_GENERATE_KEY_PAIR | CKF_EC_F_P;
@@ -2061,6 +2067,11 @@ static const CK_BYTE OID_ED25519[] = {
     0x06, 0x03, 0x2B, 0x65, 0x70
 };
 
+/* DER-encoded PrintableString for Ed25519 (alias for OID representation) */
+static const CK_BYTE CURVENAME_ED25519[] = {
+    0x13, 0x0c, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x32, 0x35, 0x35, 0x31, 0x39
+};
+
 CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
                         CK_MECHANISM_PTR pMechanism,
                         CK_ATTRIBUTE_PTR pPublicKeyTemplate, CK_ULONG ulPublicKeyAttributeCount,
@@ -2090,7 +2101,7 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
     }
 
     /* Check mechanism - we support EC key generation */
-    if (pMechanism->mechanism != CKM_EC_KEY_PAIR_GEN) {
+    if (pMechanism->mechanism != CKM_EC_KEY_PAIR_GEN && pMechanism->mechanism != CKM_EC_EDWARDS_KEY_PAIR_GEN) {
         LT_PKCS11_RETURN(CKR_MECHANISM_INVALID);
     }
 
@@ -2111,8 +2122,12 @@ CK_RV C_GenerateKeyPair(CK_SESSION_HANDLE hSession,
             } else if (pPublicKeyTemplate[i].ulValueLen == sizeof(OID_ED25519) &&
                        memcmp(pPublicKeyTemplate[i].pValue, OID_ED25519, sizeof(OID_ED25519)) == 0) {
                 curve = TR01_CURVE_ED25519;
-                LT_PKCS11_LOG("  Curve: Ed25519");
-
+                LT_PKCS11_LOG("  Curve: Ed25519 (OID alias)");
+            
+            } else if (pPublicKeyTemplate[i].ulValueLen == sizeof(CURVENAME_ED25519) &&
+                       memcmp(pPublicKeyTemplate[i].pValue, CURVENAME_ED25519, sizeof(CURVENAME_ED25519)) == 0) {
+                curve = TR01_CURVE_ED25519;
+                LT_PKCS11_LOG("  Curve: Ed25519 (Curve Name alias)");
             } else {
                 LT_PKCS11_RETURN(CKR_ATTRIBUTE_VALUE_INVALID);
             }
