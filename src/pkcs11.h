@@ -240,8 +240,8 @@ typedef CK_ULONG CK_KEY_TYPE;
 #define CKM_EC_KEY_PAIR_GEN                     0x00001040  /**< Generate short Weierstrass EC key pair (such as secp256r1) */
 #define CKM_ECDSA                               0x00001041  /**< ECDSA sign/verify (such as secp256r1) */
 
-#define CKM_EC_EDWARDS_KEY_PAIR_GEN             0x00001055  /**< Generate Edwards EC key pair (Ed25519, Ed448) */
-#define CKM_EDDSA                               0x00001057  /**< EdDSA sign/verify (Ed25519, Ed448) */
+#define CKM_EC_EDWARDS_KEY_PAIR_GEN             0x00001055  /**< Generate Edwards EC key pair (Ed25519 only) */
+#define CKM_EDDSA                               0x00001057  /**< EdDSA sign/verify (Ed25519 only) */
 
 /* ---------------------------------------------------------------------------
  * OBJECT ATTRIBUTES
