@@ -31,7 +31,7 @@ to access TROPIC01's features.
 │                (TROPIC01 Communication Library)                 │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              ▼ USB Serial (/dev/ttyACM0)
+                              ▼ USB Serial (/dev/ttyACM0) or spidev
 ┌─────────────────────────────────────────────────────────────────┐
 │                 TROPIC01 Secure Element                         │
 └─────────────────────────────────────────────────────────────────┘
@@ -40,7 +40,7 @@ to access TROPIC01's features.
 ## Requirements
 
 ### Hardware
-- TROPIC01 secure element (connected via USB, typically as `/dev/ttyACM0`)
+- TROPIC01 secure element (connected via USB, typically as `/dev/ttyACM0` or via SPI)
 - Supported development boards: TS1302 devkit
 
 ### Software
@@ -210,6 +210,44 @@ cmake -DTS_USB_DEV="/dev/ttyACM1" ..
 To find your device:
 ```bash
 ls -la /dev/ttyACM*
+```
+
+### SPI
+
+To use TROPIC01 via SPI instead of USB, you need to select the SPI HAL (`LT_HAL`) during the CMake configuration.
+Two SPI HAL variants are available:
+ - `linux_spi` using `libgpiod` to control chip select
+ - `linux_spi_native_cs` controls the chip select by SPI driver (can use native chip select instead of GPIO)
+
+The default configuration is prepared for TROPIC01 Raspberry Pi shield including the use of `GPIO5` for interrupts.
+
+#### Building with `linux_spi` HAL
+
+This configuration uses `spidev0` and controls chip select separately via `GPIO25` on `/dev/gpiochip0`.
+If interrupt is not connected to `GPIO5`, disable the functionality with `-DLT_INT_PIN=`.
+You can find available gpiochips and GPIOs via `gpioinfo` command.
+
+```bash
+cmake -DLT_HAL="linux_spi" \
+      -DLT_SPI_DEV_PATH="/dev/spidev0.0" \
+      -DLT_GPIO_DEV_PATH="/dev/gpiochip0" \
+      -DLT_SPI_CS_PIN=25 \
+      -DLT_INT_PIN=5 \
+      ..
+```
+
+#### Building for `linux_spi_native_cs` HAL
+
+This configuration controls chip select pin in the driver directly or by using GPIO.
+
+On the Raspberry Pi, `/dev/spidev0.0` uses `SPI CE0` (`GPIO 8`), while `/dev/spidev0.1` uses `SPI CE1` (`GPIO 7`).
+
+```bash
+cmake -DLT_HAL="linux_spi_native_cs" \
+      -DLT_SPI_DEV_PATH="/dev/spidev0.0" \
+      -DLT_GPIO_DEV_PATH="/dev/gpiochip0" \
+      -DLT_INT_PIN=5 \
+      ..
 ```
 
 ### Pairing Keys

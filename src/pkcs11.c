@@ -14,8 +14,13 @@
 #include "libtropic.h"
 #include "libtropic_common.h"
 #include "libtropic_openssl.h"
+#if defined(LT_HAL_POSIX_USB_DONGLE)
 #include "libtropic_port_posix_usb_dongle.h"
-
+#elif defined(LT_HAL_LINUX_SPI)
+#include "libtropic_port_linux_spi.h"
+#elif defined(LT_HAL_LINUX_SPI_NATIVE_CS)
+#include "libtropic_port_linux_spi_native_cs.h"
+#endif
 
 /**************************************************************************************************
  * TROPIC01 specifics
@@ -92,7 +97,16 @@ typedef struct {
     CK_BBOOL                    initialized;
     CK_BBOOL                    session_open;
     lt_handle_t                 lt_handle;
+#if defined(LT_HAL_POSIX_USB_DONGLE)
     lt_dev_posix_usb_dongle_t   lt_device;
+#elif defined(LT_HAL_LINUX_SPI)
+    lt_dev_linux_spi_t          lt_device;
+#elif defined(LT_HAL_LINUX_SPI_NATIVE_CS)
+    lt_dev_linux_spi_native_cs_t lt_device;
+#else
+    #error "Unsupported HAL selected"
+#endif
+
     lt_ctx_openssl_t            lt_crypto_ctx;
     CK_SESSION_HANDLE           session_handle;
 
@@ -161,12 +175,43 @@ CK_RV C_Initialize(CK_VOID_PTR pInitArgs)
         LT_PKCS11_RETURN(CKR_CRYPTOKI_ALREADY_INITIALIZED);
     }
 
-    /* Configure USB device passed from build as TS_USB_DEV option */
     memset(&pkcs11_ctx.lt_device, 0, sizeof(pkcs11_ctx.lt_device));
+#if defined(LT_HAL_POSIX_USB_DONGLE)
+    /* Configure USB device passed from build as TS_USB_DEV option */
     strncpy(pkcs11_ctx.lt_device.dev_path, TS_USB_DEV,
             sizeof(pkcs11_ctx.lt_device.dev_path) - 1);
     pkcs11_ctx.lt_device.baud_rate = 115200;
+#elif defined(LT_HAL_LINUX_SPI) || defined(LT_HAL_LINUX_SPI_NATIVE_CS)
+    int dev_path_len = snprintf(pkcs11_ctx.lt_device.spi_dev, sizeof(pkcs11_ctx.lt_device.spi_dev), "%s", LT_SPI_DEV_PATH);
+    if (dev_path_len < 0 || (size_t)dev_path_len >= sizeof(pkcs11_ctx.lt_device.spi_dev)) {
+        fprintf(stderr,
+                "Error: LT_SPI_DEV_PATH is too long for spi_dev buffer (limit is %zu bytes).\n",
+                sizeof(pkcs11_ctx.lt_device.spi_dev));
+        return -1;
+    }
+    pkcs11_ctx.lt_device.spi_speed = 5000000;
 
+#if defined(LT_HAL_LINUX_SPI) || LT_USE_INT_PIN
+    dev_path_len = snprintf(pkcs11_ctx.lt_device.gpio_dev, sizeof(pkcs11_ctx.lt_device.gpio_dev), "%s", LT_GPIO_DEV_PATH);
+    if (dev_path_len < 0 || (size_t)dev_path_len >= sizeof(pkcs11_ctx.lt_device.gpio_dev)) {
+        fprintf(
+            stderr,
+            "Error: LT_GPIO_DEV_PATH is too long for gpio_dev buffer (limit is %zu bytes).\n",
+            sizeof(pkcs11_ctx.lt_device.gpio_dev));
+        return -1;
+    }
+#endif
+
+#if defined(LT_HAL_LINUX_SPI)
+    pkcs11_ctx.lt_device.gpio_cs_num = LT_SPI_CS_PIN;
+#endif
+
+#if LT_USE_INT_PIN
+    pkcs11_ctx.lt_device.gpio_int_num = LT_INT_PIN;
+#endif
+#else
+    #error "Unsupported HAL selected"
+#endif
     /* Initialize libtropic handle */
     memset(&pkcs11_ctx.lt_handle, 0, sizeof(pkcs11_ctx.lt_handle));
     pkcs11_ctx.lt_handle.l2.device = &pkcs11_ctx.lt_device;
